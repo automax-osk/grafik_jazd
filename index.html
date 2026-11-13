@@ -82,6 +82,13 @@
   .slot.virtual { opacity:.9; }
   .slot.newride { background:#f2f8ff; border:1px dashed #90caf9; border-radius:10px; padding:8px 6px; margin-top:8px; }
   .slot .addok { border:0; border-radius:8px; background:var(--ok); color:#fff; font-size:1.1rem; font-weight:700; cursor:pointer; height:38px; }
+  .wabox { margin-top:12px; border-radius:10px; border:1px solid #b9e4c9; background:#effaf3; padding:12px 14px; }
+  .wabox .t { font-size:.75rem; text-transform:uppercase; color:#1f7a45; font-weight:700; margin-bottom:8px; }
+  .btn.wa { background:#1fa855; }
+  .wabox .log { margin-top:8px; font-size:.85rem; color:#2f4a3a; }
+  .wabox .log .no { color:var(--mut); }
+  .wabox .log .chg { color:#b45309; font-weight:600; }
+  .toast { position:fixed; left:50%; bottom:24px; transform:translateX(-50%); background:#1c2430; color:#fff; padding:12px 16px; border-radius:10px; font-size:.92rem; z-index:60; max-width:92%; box-shadow:0 6px 20px rgba(0,0,0,.25); }
   .saved { font-size:.8rem; color:var(--ok); opacity:0; transition:opacity .3s; }
   .saved.show { opacity:1; }
 
@@ -168,6 +175,8 @@
   .pa .sign { margin-top:40px; }
   .pa tr.blank td, .pa table:not(.mt) tbody tr:not(.pgap) td { height:37px; }
   .pa tr.blank td.t { font-weight:400; color:#000; letter-spacing:1px; }
+  .pa u.ov { text-decoration:underline; text-decoration-thickness:2px; text-underline-offset:3px; }
+  .pa .pov { margin-top:6px; font-size:9.5pt; }
   .pa .poff { margin-top:8px; font-size:10pt; border:1px dashed #000; padding:5px 8px; }
   .pa tr.pgap td { padding:3px 8px; font-size:9.5pt; font-style:italic; text-align:center; border-style:dashed; }
 </style>
@@ -193,6 +202,7 @@ const MIES = ['stycznia','lutego','marca','kwietnia','maja','czerwca','lipca','s
 
 let db = load();
 cleanDays();
+db.sent = db.sent || {}; // historia wysyłek: { 'instId|data': [{at, type, sig}] }
 db.off = db.off || {}; // wolne instruktorów: { 'instId|data': [{id, from, to, note}] }
 let cur = { inst: db.instructors[0]?.id || null, date: todayStr(), view:'day', month:null };
 
@@ -300,8 +310,9 @@ function render() {
   m.innerHTML = `
   <div class="card">
     <div class="instr">
-      <h2>👤 ${esc(inst.name)}</h2>
+      <h2>👤 ${esc(inst.name)} <small style="font-weight:400;color:var(--mut);font-size:.85rem">${inst.phone ? '📞 ' + esc(inst.phone) : ''}</small></h2>
       <div class="row">
+        <button class="btn sec small" id="phoneInst">📞 ${inst.phone ? 'Telefon' : 'Dodaj telefon'}</button>
         <button class="btn sec small" id="renInst">✏️ Zmień nazwę</button>
         <button class="btn sec small" id="delInst">🗑️ Usuń</button>
       </div>
@@ -358,6 +369,7 @@ function render() {
       ${filled.length ? `<div class="k">od ${filled[0].start} do ${filled[filled.length-1].end}</div>` : ''}
       ${gF.length ? `<div class="k" style="width:100%">☕ Przerwy: <b>${gF.map(g => `${g.from}–${g.to} (${fmtDur(g.min)})`).join(', ')}</b> · razem ${fmtDur(gapMin)}</div>` : ''}
     </div>
+    ${waBox(inst)}
   </div>
 
   <div class="card">
@@ -412,9 +424,18 @@ function render() {
     db.instructors = db.instructors.filter(i => i.id !== inst.id);
     Object.keys(db.days).forEach(k => { if (k.startsWith(inst.id+'|')) delete db.days[k]; });
     Object.keys(db.off).forEach(k => { if (k.startsWith(inst.id+'|')) delete db.off[k]; });
+    Object.keys(db.sent).forEach(k => { if (k.startsWith(inst.id+'|')) delete db.sent[k]; });
     cur.inst = db.instructors[0]?.id || null; save(); render();
   };
   if ($('goOff')) $('goOff').onclick = e => { e.preventDefault(); cur.view = 'off'; cur.offInst = cur.inst; cur.offDate = cur.date; render(); };
+  $('phoneInst').onclick = () => {
+    const n = prompt(`Numer telefonu (WhatsApp) instruktora ${inst.name}:`, inst.phone || '+48 ');
+    if (n === null) return;
+    inst.phone = n.trim().replace(/^\+48\s*$/, ''); save(); render();
+  };
+  $('waText').onclick = () => sendWA(inst, cur.date, 'tekst');
+  $('waImg').onclick = () => sendWA(inst, cur.date, 'obraz');
+  $('waDl').onclick = e => { e.preventDefault(); download(dataUrlToBlob(drawCard(inst, cur.date).toDataURL('image/png')), `grafik-${slug(inst.name)}-${cur.date}.png`); };
   $('viewToggle').onclick = () => { db.settings.grid = !db.settings.grid; save(); render(); };
   if ($('addSlot')) $('addSlot').onclick = () => {
     const d = ensureDay();
@@ -772,14 +793,14 @@ function exportExcel() {
   const months = [...new Set(Object.keys(db.days).map(k => k.split('|')[1].slice(0,7)))].sort();
   const p = [['Miesiąc','Instruktor','Dni','Jazd','Godzin']];
   months.forEach(ym => { const st = monthStats(ym); db.instructors.forEach(i => { const x = st[i.id]; if (x.rides) p.push([fmtMonth(ym), i.name, x.days.length, x.rides, Math.round(x.min/60*100)/100]); }); });
-  const ins = [['Instruktor'], ...db.instructors.map(i => [i.name])];
+  const ins = [['Instruktor','Telefon'], ...db.instructors.map(i => [i.name, i.phone || ''])];
   const offRows = [['Instruktor','Data','Dzień','Od','Do','Powód']];
   Object.keys(db.off).sort((a,b) => a.split('|')[1].localeCompare(b.split('|')[1])).forEach(k => { const [id, date] = k.split('|'); if (!name(id)) return;
     offFor(id, date).forEach(o => offRows.push([name(id), date, dow(date), o.from, o.to, o.note])); });
   download(buildXlsx([
     { name:'Grafik', rows:g, widths:[24,12,13,10,10,28,28,9] },
     { name:'Podsumowanie', rows:p, widths:[18,24,8,8,10] },
-    { name:'Instruktorzy', rows:ins, widths:[30] },
+    { name:'Instruktorzy', rows:ins, widths:[30,18] },
     { name:'Wolne', rows:offRows, widths:[24,12,13,10,10,30] }
   ]), `grafik-automax-${todayStr()}.xlsx`);
 }
@@ -882,6 +903,7 @@ function importExcel() {
       if (!confirm(`Wczytać z Excela ${parsed.length} terminów (${dayCount} dni)?${skipped ? `\nPominięto ${skipped} wierszy z błędną datą lub godziną.` : ''}\nDni z pliku zastąpią te same dni w programie.`)) return;
       if (!(await requirePassword('Wczytanie kopii z Excela zastąpi dni zapisane w programie.'))) return;
       extraNames.forEach(getInst);
+      if (si) si.rows.slice(1).forEach(r => { const nm = String(r[0] ?? '').trim(), ph = String(r[1] ?? '').trim(); if (nm && ph) getInst(nm).phone = ph; });
       parsed.forEach(p => { const i = getInst(p.nm), k = i.id + '|' + p.d; (days[k] = days[k] || []).push({ id:uid(), start:p.s, end:p.e, name:p.k, note:p.u }); n++; });
       Object.assign(db.days, days); cleanDays();
       const so = sheets.find(x => normName(x.name) === 'wolne');
@@ -932,6 +954,132 @@ function allNames() {
 }
 
 /* ---------- druk ---------- */
+/* godzina podkreślona, jeśli wypada w trakcie innej jazdy */
+function ovTime(s, list) {
+  const a = toMin(s.start), b = toMin(s.end), others = list.filter(o => o !== s && o.id !== s.id);
+  const stIn = others.some(o => toMin(o.start) <= a && a < toMin(o.end));
+  const enIn = others.some(o => toMin(o.start) < b && b <= toMin(o.end));
+  const u = (t, on) => on ? `<u class="ov">${esc(t)}</u>` : esc(t);
+  return `${u(s.start, stIn)} – ${u(s.end, enIn)}`;
+}
+/* ---------- WhatsApp: tekst i obraz karty dnia ---------- */
+function slug(s) { return String(s).normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/ł/g,'l').replace(/Ł/g,'L').replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,'').toLowerCase(); }
+function waPhone(p) { let d = String(p || '').replace(/\D/g, ''); if (d.startsWith('00')) d = d.slice(2); if (d.length === 9) d = '48' + d; return d; }
+function dayData(inst, date) {
+  const rides = slotsFor(inst.id, date).filter(s => s.name.trim()).sort((a,b) => toMin(a.start) - toMin(b.start));
+  const gaps = findGaps(rides), offs = offFor(inst.id, date);
+  const min = rides.reduce((a,s) => a + slotMin(s), 0);
+  return { rides, gaps, offs, min };
+}
+function daySig(inst, date) { const d = dayData(inst, date); return sha256(JSON.stringify([d.rides.map(r => [r.start, r.end, r.name, r.note]), d.offs.map(o => [o.from, o.to, o.note])])).slice(0, 12); }
+function rideWord(n) { return n === 1 ? 'jazda' : (n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 'jazdy' : 'jazd'); }
+function buildText(inst, date) {
+  const { rides, gaps, offs, min } = dayData(inst, date), d = parseD(date);
+  const L = [`*AUTO-MAX – grafik pracy*`, `_${inst.name}, ${dow(date)} ${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}_`, ''];
+  if (!rides.length) L.push('Brak zaplanowanych jazd.');
+  rides.forEach((r, i) => {
+    L.push(`*${r.start}-${r.end}* ${r.name}${r.note ? ` _(${r.note})_` : ''}`);
+    gaps.filter(g => g.after === i).forEach(g => L.push(`_– przerwa ${fmtDur(g.min)} –_`));
+  });
+  if (offs.length) L.push('', `⛔ *Wolne:* ${offs.map(o => `${o.from}-${o.to}${o.note ? ' (' + o.note + ')' : ''}`).join(', ')}`);
+  L.push('', `*Razem: ${rides.length} ${rideWord(rides.length)}, ${fmtH(min)} h*`);
+  return L.join('\n');
+}
+function drawCard(inst, date) {
+  const { rides, gaps, offs, min } = dayData(inst, date);
+  const W = 900, P = 40, rowH = 46, F = 'system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif';
+  const items = []; rides.forEach((r, i) => { items.push({ r }); gaps.filter(g => g.after === i).forEach(g => items.push({ g })); });
+  const H = 230 + Math.max(1, items.length) * rowH + (offs.length ? 60 : 0) + 90;
+  const c = document.createElement('canvas'), k = 2; c.width = W * k; c.height = H * k;
+  const x = c.getContext('2d'); x.scale(k, k);
+  x.fillStyle = '#fff'; x.fillRect(0, 0, W, H); x.fillStyle = '#000'; x.textBaseline = 'middle';
+  const clip = (t, w) => { t = String(t); if (x.measureText(t).width <= w) return t; while (t && x.measureText(t + '…').width > w) t = t.slice(0, -1); return t + '…'; };
+  x.font = `italic 15px ${F}`; x.fillText('Program przygotował Benek Benek dla', P, 40);
+  x.font = `bold 26px ${F}`; x.fillText('AUTO-MAX Szkoła Nauki Jazdy', P, 70);
+  x.textAlign = 'right'; x.font = `bold 24px ${F}`; x.fillText(fmtLong(date), W - P, 46);
+  x.font = `17px ${F}`; x.fillText(dow(date).charAt(0).toUpperCase() + dow(date).slice(1), W - P, 74); x.textAlign = 'left';
+  x.fillRect(P, 94, W - 2*P, 3);
+  x.font = `bold 26px ${F}`; x.fillText(clip('Grafik pracy instruktora – ' + inst.name, W - 2*P), P, 128);
+  let y = 160; const c1 = P, c2 = P + 170, c3 = P + 520;
+  x.fillStyle = '#eee'; x.fillRect(P, y, W - 2*P, 36); x.fillStyle = '#000';
+  x.font = `bold 15px ${F}`; x.fillText('Godzina', c1 + 10, y + 18); x.fillText('Kursant', c2 + 10, y + 18); x.fillText('Uwagi', c3 + 10, y + 18);
+  x.strokeStyle = '#000'; x.lineWidth = 1; x.strokeRect(P, y, W - 2*P, 36); y += 36;
+  const clash = findClashes(rides);
+  if (!items.length) { x.font = `italic 18px ${F}`; x.fillText('Brak zaplanowanych jazd', c1 + 10, y + rowH/2); x.strokeRect(P, y, W - 2*P, rowH); y += rowH; }
+  items.forEach(it => {
+    if (it.r) {
+      const r = it.r;
+      x.font = `bold 19px ${F}`; x.fillText(`${r.start} – ${r.end}`, c1 + 10, y + rowH/2);
+      if (clash.has(r.id)) { x.fillRect(c1 + 10, y + rowH/2 + 13, x.measureText(`${r.start} – ${r.end}`).width, 2); }
+      x.font = `20px ${F}`; x.fillText(clip(r.name, c3 - c2 - 20), c2 + 10, y + rowH/2);
+      x.font = `17px ${F}`; x.fillText(clip(r.note || '', W - P - c3 - 20), c3 + 10, y + rowH/2);
+      x.strokeRect(P, y, W - 2*P, rowH); x.beginPath(); x.moveTo(c2, y); x.lineTo(c2, y + rowH); x.moveTo(c3, y); x.lineTo(c3, y + rowH); x.stroke();
+    } else {
+      x.font = `italic 16px ${F}`; x.textAlign = 'center'; x.fillText(`Przerwa ${fmtDur(it.g.min)} (${it.g.from} – ${it.g.to})`, W/2, y + rowH/2); x.textAlign = 'left';
+      x.setLineDash([4, 3]); x.strokeRect(P, y, W - 2*P, rowH); x.setLineDash([]);
+    }
+    y += rowH;
+  });
+  if (offs.length) { y += 14; x.setLineDash([5, 4]); x.strokeRect(P, y, W - 2*P, 40); x.setLineDash([]);
+    x.font = `bold 16px ${F}`; const lbl = 'Wolne instruktora – nie planować: '; x.fillText(lbl, P + 10, y + 20);
+    x.font = `16px ${F}`; x.fillText(clip(offs.map(o => `${o.from}–${o.to}${o.note ? ' (' + o.note + ')' : ''}`).join(', '), W - 2*P - 20 - x.measureText(lbl).width), P + 10 + (x.font = `bold 16px ${F}`, x.measureText(lbl).width), y + 20); y += 46; }
+  y += 24; x.font = `bold 20px ${F}`;
+  x.fillText(`Razem: ${rides.length} ${rideWord(rides.length)} · ${fmtH(min)} h${rides.length ? `   (od ${rides[0].start} do ${rides[rides.length-1].end})` : ''}`, P, y);
+  x.font = `13px ${F}`; x.fillStyle = '#555'; x.fillText('Wygenerowano: ' + new Date().toLocaleString('pl-PL'), P, y + 34);
+  return c;
+}
+function dataUrlToBlob(u) { const [h, b] = u.split(','), bin = atob(b), a = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return new Blob([a], { type:h.match(/:(.*?);/)[1] }); }
+function toast(msg, ms = 6000) { const t = document.createElement('div'); t.className = 'toast'; t.innerHTML = msg; document.body.appendChild(t); setTimeout(() => t.remove(), ms); }
+function logSent(inst, date, type) {
+  const k = inst.id + '|' + date; (db.sent[k] = db.sent[k] || []).push({ at:new Date().toISOString(), type, sig:daySig(inst, date) });
+  save(); render();
+}
+function sendWA(inst, date, type) {
+  const ph = waPhone(inst.phone), base = 'https://wa.me/' + ph;
+  if (type === 'tekst') {
+    window.open(base + '?text=' + encodeURIComponent(buildText(inst, date)), '_blank');
+    logSent(inst, date, 'tekst');
+    if (!ph) toast('Instruktor nie ma wpisanego telefonu – w WhatsAppie wybierz kontakt ręcznie. Numer dodasz przyciskiem „📞 Dodaj telefon”.');
+    return;
+  }
+  const canvas = drawCard(inst, date), blob = dataUrlToBlob(canvas.toDataURL('image/png'));
+  const file = new File([blob], `grafik-${slug(inst.name)}-${date}.png`, { type:'image/png' });
+  const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  if (mobile && navigator.canShare && navigator.canShare({ files:[file] })) {
+    navigator.share({ files:[file], title:'Grafik pracy – ' + inst.name })
+      .then(() => logSent(inst, date, 'obraz'))
+      .catch(err => { if (err && err.name !== 'AbortError') toast('Nie udało się udostępnić obrazu: ' + esc(err.message)); });
+    return;
+  }
+  if (navigator.clipboard && window.ClipboardItem) {
+    navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]).then(() => {
+      toast(`🖼️ <b>Obraz grafiku skopiowany.</b> W otwartym WhatsAppie naciśnij <b>Ctrl+V</b> i <b>Wyślij</b>.${ph ? '' : '<br>Instruktor nie ma telefonu – wybierz kontakt ręcznie.'}`, 9000);
+    }).catch(() => { download(blob, file.name); toast('Nie udało się skopiować obrazu – zapisałem go w Pobranych. Dołącz go w WhatsAppie (spinacz → zdjęcie).', 9000); });
+    window.open(base, '_blank');
+    logSent(inst, date, 'obraz');
+    return;
+  }
+  download(blob, file.name); window.open(base, '_blank'); logSent(inst, date, 'obraz');
+  toast('Obraz grafiku zapisany w Pobranych – dołącz go w WhatsAppie (spinacz → zdjęcie).', 9000);
+}
+function waBox(inst) {
+  const log = (db.sent[inst.id + '|' + cur.date] || []);
+  const last = log[log.length - 1], changed = last && last.sig !== daySig(inst, cur.date);
+  const fmt = a => new Date(a).toLocaleString('pl-PL', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
+  return `<div class="wabox">
+    <div class="t">📲 Wyślij grafik na WhatsApp${inst.phone ? ' · ' + esc(inst.phone) : ''}</div>
+    <div class="row">
+      <button class="btn wa small" id="waText">💬 Wyślij jako tekst</button>
+      <button class="btn wa small" id="waImg">🖼️ Wyślij jako obraz</button>
+      <a href="#" id="waDl" style="font-size:.85rem;color:var(--c)">pobierz obraz</a>
+    </div>
+    <div class="log">${log.length
+      ? `✅ Wysłano: ${log.slice(-5).reverse().map(l => `<b>${fmt(l.at)}</b> (${l.type})`).join(', ')}${log.length > 5 ? ` i wcześniej jeszcze ${log.length - 5}×` : ''}
+         ${changed ? '<div class="chg">⚠️ Grafik zmienił się po ostatniej wysyłce – wyślij ponownie.</div>' : ''}`
+      : '<span class="no">✉️ Ten grafik nie był jeszcze wysyłany.</span>'}</div>
+  </div>`;
+}
+
 function printPages(pages) {
   if (!pages.length) { alert('Brak jazd do wydruku.'); return; }
   $('printArea').innerHTML = pages.map((p, idx) => {
@@ -939,6 +1087,7 @@ function printPages(pages) {
     const filled = slots.filter(s => s.name.trim());
     const min = filled.reduce((a,s) => a + Math.max(0, (toMin(s.end)??0) - (toMin(s.start)??0)), 0);
     // na wydruku przerwy liczymy tylko między zaplanowanymi jazdami
+    const clash = findClashes(filled);
     const gaps = findGaps(filled), gapMin = gaps.reduce((a,g) => a + g.min, 0);
     return `<div class="pa bw ${idx < pages.length-1 ? 'week' : ''}">
       <div class="ph"><div class="school"><small class="by">Program przygotował <svg class="pfb" viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="#000"/><path d="M13.4 19.5v-6.1h2.05l.31-2.4H13.4V9.5c0-.69.19-1.16 1.18-1.16h1.26V6.2a17 17 0 0 0-1.84-.1c-1.82 0-3.07 1.11-3.07 3.15V11H8.87v2.4h2.06v6.1z" fill="#fff"/></svg><b>Benek Benek</b> dla</small>AUTO-MAX Szkoła Nauki Jazdy</div>
@@ -947,10 +1096,11 @@ function printPages(pages) {
       <p class="dt">Dzień: ${dow(p.date)}, ${fmtLong(p.date)}</p>
       <table>
         <thead><tr><th>Godzina</th><th>Kursant</th><th>Uwagi</th></tr></thead>
-        <tbody>${filled.map((s, i) => `<tr><td class="t">${s.name.trim() ? `${esc(s.start)} – ${esc(s.end)}` : ''}</td><td class="n">${esc(s.name)}${offHit(s, offFor(p.inst.id, p.date)).length ? ' <i style="font-size:8.5pt">(w czasie wolnego!)</i>' : ''}</td><td>${esc(s.note)}</td></tr>`
+        <tbody>${filled.map((s, i) => `<tr><td class="t">${s.name.trim() ? ovTime(s, filled) : ''}</td><td class="n">${esc(s.name)}${offHit(s, offFor(p.inst.id, p.date)).length ? ' <i style="font-size:8.5pt">(w czasie wolnego!)</i>' : ''}</td><td>${esc(s.note)}</td></tr>`
           + gaps.filter(g => g.after === i).map(g => `<tr class="pgap"><td colspan="3">Przerwa ${fmtDur(g.min)} (${g.from} – ${g.to})</td></tr>`).join('')).join('')}
           ${'<tr class="blank"><td class="t"></td><td></td><td></td></tr>'.repeat(5)}</tbody>
       </table>
+      ${clash.size ? `<div class="pov"><u class="ov">Podkreślona godzina</u> – w tym miejscu jazda nakłada się na inną jazdę.</div>` : ''}
       ${offFor(p.inst.id, p.date).length ? `<div class="poff"><b>Wolne instruktora – nie planować:</b> ${offText(offFor(p.inst.id, p.date))}</div>` : ''}
       <div class="foot"><span><b>Podsumowanie dnia:</b> jazd: <b>${filled.length}</b> · godzin: <b>${fmtH(min)}</b>${filled.length ? ` (od ${filled[0].start} do ${filled[filled.length-1].end})` : ''}${gaps.length ? ` · przerwy: <b>${fmtDur(gapMin)}</b>` : ''}</span><span>Wydrukowano: ${new Date().toLocaleString('pl-PL')}</span></div>
       <div class="corr">
@@ -983,7 +1133,7 @@ function importData() {
         db = Object.assign({ settings:{ start:'06:00', end:'22:00', len:120 } }, d);
         if (keepPw) db.settings.pwHash = keepPw; // obecne hasło zostaje
         cleanDays();
-        db.off = db.off || {};
+        db.off = db.off || {}; db.sent = db.sent || {};
         cur.inst = db.instructors[0]?.id || null; save(); render();
       } catch(e) { alert('To nie jest poprawny plik kopii grafiku.'); }
     };
