@@ -123,7 +123,7 @@
   .pa .corr { margin-top:16px; border:1px solid #000; padding:10px 12px; display:flex; justify-content:space-between; gap:20px; font-size:11pt; }
   .pa .corr .ln { display:inline-block; width:70px; border-bottom:1px solid #000; margin:0 3px; }
   .pa .sign { margin-top:40px; }
-  .pa tr.blank td { height:37px; }
+  .pa tr.blank td, .pa table:not(.mt) tbody tr:not(.pgap) td { height:37px; }
   .pa tr.blank td.t { font-weight:400; color:#000; letter-spacing:1px; }
   .pa tr.pgap td { padding:3px 8px; font-size:9.5pt; font-style:italic; text-align:center; border-style:dashed; }
 </style>
@@ -657,7 +657,8 @@ function printPages(pages) {
     const slots = slotsFor(p.inst.id, p.date).slice().sort((a,b) => (toMin(a.start)??0) - (toMin(b.start)??0));
     const filled = slots.filter(s => s.name.trim());
     const min = filled.reduce((a,s) => a + Math.max(0, (toMin(s.end)??0) - (toMin(s.start)??0)), 0);
-    const gaps = findGaps(slots), gapMin = gaps.reduce((a,g) => a + g.min, 0);
+    // na wydruku przerwy liczymy tylko między zaplanowanymi jazdami
+    const gaps = findGaps(filled), gapMin = gaps.reduce((a,g) => a + g.min, 0);
     return `<div class="pa bw ${idx < pages.length-1 ? 'week' : ''}">
       <div class="ph"><div class="school"><small class="by">Program przygotował <svg class="pfb" viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="#000"/><path d="M13.4 19.5v-6.1h2.05l.31-2.4H13.4V9.5c0-.69.19-1.16 1.18-1.16h1.26V6.2a17 17 0 0 0-1.84-.1c-1.82 0-3.07 1.11-3.07 3.15V11H8.87v2.4h2.06v6.1z" fill="#fff"/></svg><b>Benek Benek</b> dla</small>AUTO-MAX Szkoła Nauki Jazdy</div>
         <div class="r"><b>${fmtLong(p.date)}</b><span style="text-transform:capitalize">${dow(p.date)}</span></div></div>
@@ -665,9 +666,9 @@ function printPages(pages) {
       <p class="dt">Dzień: ${dow(p.date)}, ${fmtLong(p.date)}</p>
       <table>
         <thead><tr><th>Godzina</th><th>Kursant</th><th>Uwagi</th></tr></thead>
-        <tbody>${slots.map((s, i) => `<tr><td class="t">${esc(s.start)} – ${esc(s.end)}</td><td class="n">${esc(s.name)}</td><td>${esc(s.note)}</td></tr>`
+        <tbody>${filled.map((s, i) => `<tr><td class="t">${s.name.trim() ? `${esc(s.start)} – ${esc(s.end)}` : ''}</td><td class="n">${esc(s.name)}</td><td>${esc(s.note)}</td></tr>`
           + gaps.filter(g => g.after === i).map(g => `<tr class="pgap"><td colspan="3">Przerwa ${fmtDur(g.min)} (${g.from} – ${g.to})</td></tr>`).join('')).join('')}
-          ${'<tr class="blank"><td class="t"></td><td></td><td></td></tr>'.repeat(Math.max(4, 14 - slots.length - gaps.length))}</tbody>
+          ${'<tr class="blank"><td class="t"></td><td></td><td></td></tr>'.repeat(5)}</tbody>
       </table>
       <div class="foot"><span><b>Podsumowanie dnia:</b> jazd: <b>${filled.length}</b> · godzin: <b>${fmtH(min)}</b>${filled.length ? ` (od ${filled[0].start} do ${filled[filled.length-1].end})` : ''}${gaps.length ? ` · przerwy: <b>${fmtDur(gapMin)}</b>` : ''}</span><span>Wydrukowano: ${new Date().toLocaleString('pl-PL')}</span></div>
       <div class="corr">
