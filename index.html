@@ -97,6 +97,11 @@
   .offform { display:grid; grid-template-columns:1fr 1fr; gap:4px 12px; }
   .offform .full { grid-column:1/-1; }
   .offform input, .offform select { width:100%; }
+  .offform .allday { display:flex; align-items:center; gap:8px; font-size:.95rem; margin:2px 0 8px; cursor:pointer; }
+  .offform .allday input { width:auto; transform:scale(1.2); }
+  .orange { display:flex; align-items:center; gap:6px; margin-bottom:6px; }
+  .orange input { width:130px !important; }
+  .orange .del { background:none; border:0; font-size:1.1rem; cursor:pointer; color:var(--mut); }
   @media (max-width:560px){ .offform { grid-template-columns:1fr; } }
   .daysum { margin-top:14px; border-radius:10px; background:#e8f2fd; border:1px solid #bbdefb; padding:12px 14px; display:flex; flex-wrap:wrap; gap:6px 22px; align-items:baseline; }
   .daysum .t { font-size:.75rem; text-transform:uppercase; color:var(--c); font-weight:700; width:100%; }
@@ -635,13 +640,17 @@ function renderOff() {
       <div class="full"><label class="l">Instruktor</label><select id="oInst">${db.instructors.map(i => `<option value="${i.id}" ${i.id===instSel?'selected':''}>${esc(i.name)}</option>`).join('')}</select></div>
       <div><label class="l">Dzień</label><input type="date" id="oDate" value="${cur.offDate || cur.date}"></div>
       <div><label class="l">Do dnia (dla kilku dni, np. urlop)</label><input type="date" id="oDate2"></div>
-      <div><label class="l">Od godziny</label><input type="time" id="oFrom" step="300" value="${db.settings.start}"></div>
-      <div><label class="l">Do godziny</label><input type="time" id="oTo" step="300" value="${db.settings.end}"></div>
+      <div class="full">
+        <label class="l">Godziny wolnego</label>
+        <label class="allday"><input type="checkbox" id="oAll"> Cały dzień (${db.settings.start}–${db.settings.end})</label>
+        <div id="oRanges"></div>
+        <button type="button" class="btn sec small" id="oMore" style="margin-top:6px">＋ Dodaj kolejne godziny</button>
+      </div>
       <div class="full"><label class="l">Powód (opcjonalnie)</label><input id="oNote" placeholder="np. lekarz, urlop, sprawy prywatne"></div>
     </div>
     <div class="row" style="margin-top:12px">
       <button class="btn" id="oAdd">＋ Zapisz wolne</button>
-      <span class="lock">Domyślnie cały dzień pracy (${db.settings.start}–${db.settings.end}) – zmień godziny, jeśli wolne jest tylko na część dnia.</span>
+      <span class="lock">Możesz wpisać kilka przedziałów w jednym dniu, np. 7:00–9:00 i 13:00–15:30.</span>
     </div>
   </div>
   <div class="card offlist">
@@ -651,13 +660,30 @@ function renderOff() {
     </div>
     ${rows || '<div class="empty">Brak zgłoszonego wolnego.</div>'}
   </div>`;
+  const addRange = () => {
+    const r = document.createElement('div'); r.className = 'orange';
+    r.innerHTML = `<input type="time" class="of" step="300"><span>–</span><input type="time" class="ot" step="300"><button type="button" class="del" title="Usuń te godziny">✕</button>`;
+    r.querySelector('.del').onclick = () => { if ($('oRanges').children.length > 1) r.remove(); else { r.querySelector('.of').value = ''; r.querySelector('.ot').value = ''; } };
+    $('oRanges').appendChild(r); r.querySelector('.of').focus();
+  };
+  addRange(); document.activeElement.blur();
+  $('oMore').onclick = addRange;
+  $('oAll').onchange = e => { $('oRanges').style.display = $('oMore').style.display = e.target.checked ? 'none' : ''; };
   $('oAdd').onclick = () => {
-    const id = $('oInst').value, d1 = $('oDate').value, d2 = $('oDate2').value || d1, from = $('oFrom').value, to = $('oTo').value;
+    const id = $('oInst').value, d1 = $('oDate').value, d2 = $('oDate2').value || d1;
     if (!id || !d1) return alert('Wybierz instruktora i dzień.');
     if (d2 < d1) return alert('„Do dnia” nie może być wcześniej niż „Dzień”.');
-    if (!from || !to || toMin(to) <= toMin(from)) return alert('Podaj poprawne godziny „od” i „do”.');
+    let ranges;
+    if ($('oAll').checked) ranges = [{ from:db.settings.start, to:db.settings.end }];
+    else {
+      ranges = [...document.querySelectorAll('#oRanges .orange')].map(r => ({ from:r.querySelector('.of').value, to:r.querySelector('.ot').value })).filter(r => r.from || r.to);
+      if (!ranges.length) return alert('Wpisz godziny wolnego albo zaznacz „Cały dzień”.');
+      const bad = ranges.find(r => !r.from || !r.to || toMin(r.to) <= toMin(r.from));
+      if (bad) return alert(`Sprawdź godziny ${bad.from || '?'}–${bad.to || '?'} – koniec musi być po początku.`);
+    }
+    const note = $('oNote').value.trim() || ($('oAll').checked ? 'cały dzień' : '');
     let d = d1, n = 0;
-    while (d <= d2 && n < 366) { const k = id + '|' + d; (db.off[k] = db.off[k] || []).push({ id:uid(), from, to, note:$('oNote').value.trim() }); d = addDays(d, 1); n++; }
+    while (d <= d2 && n < 366) { const k = id + '|' + d; db.off[k] = db.off[k] || []; ranges.forEach(r => db.off[k].push({ id:uid(), from:r.from, to:r.to, note })); d = addDays(d, 1); n++; }
     cur.offInst = id; cur.offDate = d1; save(); render();
   };
   $('oPast').onchange = e => { cur.offPast = e.target.checked; render(); };
