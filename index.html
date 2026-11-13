@@ -401,7 +401,7 @@ function render() {
     <details id="setDet" ${cur.setOpen ? 'open' : ''}>
       <summary>⚙️ Ustawienia, hasło i kopia zapasowa</summary>
       <div style="margin-top:10px;padding:10px 12px;border-radius:10px;background:#f5f7fa">
-        <div class="lock">${hasPassword() ? '🔒 Hasło jest ustawione – chroni usuwanie i zmianę nazwy instruktora, kasowanie jazd i wczytywanie kopii.' : '🔓 Hasło nie jest ustawione – usuwanie wymaga tylko potwierdzenia.'}</div>
+        <div class="lock">${hasPassword() ? '🔒 Hasło jest ustawione – chroni usuwanie instruktora, zmianę jego nazwy i numeru telefonu, kasowanie jazd i wczytywanie kopii.' : '🔓 Hasło nie jest ustawione – usuwanie wymaga tylko potwierdzenia.'}</div>
         <div class="row" style="margin-top:8px">
           <button class="btn small" onclick="setPassword()">🔑 ${hasPassword() ? 'Zmień hasło' : 'Ustaw hasło'}</button>
           ${hasPassword() ? '<button class="btn sec small" onclick="removePassword()">Usuń hasło</button>' : ''}
@@ -455,7 +455,8 @@ function render() {
     if (r[0] && r[1]) { inst.start = r[0]; inst.end = r[1]; } else { delete inst.start; delete inst.end; }
     save(); render();
   };
-  $('phoneInst').onclick = () => {
+  $('phoneInst').onclick = async () => {
+    if (!(await requirePassword(`${inst.phone ? 'Zmiana' : 'Dodanie'} numeru telefonu instruktora „${esc(inst.name)}”.`))) return;
     const n = prompt(`Numer telefonu (WhatsApp) instruktora ${inst.name}:`, inst.phone || '+48 ');
     if (n === null) return;
     inst.phone = n.trim().replace(/^\+48\s*$/, ''); save(); render();
@@ -592,7 +593,7 @@ async function requirePassword(what) {
 async function setPassword() {
   if (hasPassword() && !(await requirePassword('Podaj obecne hasło (albo hasło awaryjne), żeby je zmienić.'))) return;
   const r = await modal({ title: hasPassword() ? '🔑 Zmień hasło' : '🔑 Ustaw hasło',
-    text:'Hasło będzie potrzebne przy usuwaniu instruktora, zmianie jego nazwy, kasowaniu jazd i wczytywaniu kopii.',
+    text:'Hasło będzie potrzebne przy usuwaniu instruktora, zmianie jego nazwy i numeru telefonu, kasowaniu jazd i wczytywaniu kopii.',
     fields:[{ label:'Nowe hasło' }, { label:'Powtórz nowe hasło' }], ok:'Zapisz',
     check: v => v[0].length < 4 ? 'Hasło musi mieć co najmniej 4 znaki.' : (v[0] !== v[1] ? 'Hasła nie są takie same.' : '') });
   if (!r) return;
@@ -1172,7 +1173,8 @@ function renderSend() {
   $('sPrev').onclick = () => go(addDays(date, -1)); $('sNext').onclick = () => go(addDays(date, 1));
   $('sToday').onclick = () => go(todayStr()); $('sTom').onclick = () => go(addDays(todayStr(), 1));
   $('sSkip').onchange = e => { cur.sendSkip = e.target.checked; cur.sendQ = null; render(); };
-  document.querySelectorAll('[data-ph]').forEach(a => a.onclick = e => { e.preventDefault(); const i = db.instructors.find(x => x.id === a.dataset.ph);
+  document.querySelectorAll('[data-ph]').forEach(a => a.onclick = async e => { e.preventDefault(); const i = db.instructors.find(x => x.id === a.dataset.ph);
+    if (!(await requirePassword(`Dodanie numeru telefonu instruktora „${esc(i.name)}”.`))) return;
     const n = prompt(`Numer telefonu (WhatsApp) instruktora ${i.name}:`, '+48 '); if (n && n.trim().replace(/^\+48\s*$/, '')) { i.phone = n.trim(); save(); render(); } });
   document.querySelectorAll('[data-t]').forEach(b => b.onclick = () => sendWA(db.instructors.find(x => x.id === b.dataset.t), date, 'tekst'));
   document.querySelectorAll('[data-i]').forEach(b => b.onclick = () => sendWA(db.instructors.find(x => x.id === b.dataset.i), date, 'obraz'));
