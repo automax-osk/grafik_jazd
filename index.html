@@ -250,17 +250,28 @@ function ensureDay() {
 }
 function slotsFor(inst, date) { return getDay(inst, date) || []; }
 /* puste bloki siatki tam, gdzie nic nie jest zapisane */
-function virtualBlocks(real) {
-  return defaultSlots().filter(v => !real.some(r => { const a = toMin(r.start), b = toMin(r.end); return a != null && b != null && a < toMin(v.end) && toMin(v.start) < b; }))
-    .map(v => ({ ...v, virtual:true }));
+/* godziny pracy: własne instruktora albo domyślne z ustawień */
+function workHours(inst) { return { start:(inst && inst.start) || db.settings.start, end:(inst && inst.end) || db.settings.end, own:!!(inst && inst.start) }; }
+function virtualBlocks(real, inst) {
+  // wolny czas w godzinach pracy (między jazdami) dzielony na bloki; ostatni blok może być krótszy (np. 17:00–18:00)
+  const wh = workHours(inst), S = toMin(wh.start), E = toMin(wh.end), len = Number(db.settings.len) || 120, out = [];
+  const busy = real.map(r => [toMin(r.start), toMin(r.end)]).filter(([a,b]) => a != null && b != null && b > a).sort((x,y) => x[0] - y[0]);
+  let t = S;
+  const fill = (a, b) => {
+    if (b - a < 60) return; // krótsze okienko zostaje przerwą
+    for (let x = a; x < b; ) { const e = Math.min(x + len, b); if (e - x >= 30) out.push({ id:uid(), start:toTime(x), end:toTime(e), name:'', note:'', virtual:true }); x = e; }
+  };
+  busy.forEach(([a,b]) => { if (a > t) fill(t, Math.min(a, E)); t = Math.max(t, b); });
+  if (t < E) fill(t, E);
+  return out;
 }
 /* sprzątanie: puste wpisy (bez kursanta i uwag) nie są przechowywane */
 function cleanDays() {
   Object.keys(db.days).forEach(k => { db.days[k] = db.days[k].filter(x => x.name.trim() || x.note.trim()); if (!db.days[k].length) delete db.days[k]; });
 }
 /* podpowiedź godziny nowej jazdy: koniec ostatniej jazdy, z pominięciem wolnego instruktora */
-function suggestStart(real, offs) {
-  let t = real.length ? Math.max(...real.map(x => toMin(x.end) ?? 0)) : toMin(db.settings.start);
+function suggestStart(real, offs, inst) {
+  let t = real.length ? Math.max(...real.map(x => toMin(x.end) ?? 0)) : toMin(workHours(inst).start);
   for (let i = 0; i < 5; i++) { const o = offs.find(o => toMin(o.from) <= t && t < toMin(o.to)); if (!o) break; t = toMin(o.to); }
   return t;
 }
@@ -302,20 +313,21 @@ function render() {
   }
   const grid = !!db.settings.grid;
   const real = (getDay() || []).slice().sort((a,b) => (toMin(a.start)??0) - (toMin(b.start)??0));
-  const slots = (grid ? real.concat(virtualBlocks(real)) : real).sort((a,b) => (toMin(a.start)??0) - (toMin(b.start)??0));
+  const slots = (grid ? real.concat(virtualBlocks(real, inst)) : real).sort((a,b) => (toMin(a.start)??0) - (toMin(b.start)??0));
   const clashes = findClashes(real);
   const offs = offFor();
   const filled = real.filter(s => s.name.trim());
   const gaps = findGaps(slots);
   const gF = findGaps(filled), gapMin = gF.reduce((a,g) => a + g.min, 0);
-  const nStart = suggestStart(filled, offs), nLen = Number(db.settings.len) || 120;
+  const nStart = suggestStart(filled, offs, inst), nLen = Number(db.settings.len) || 120;
   const minutes = filled.reduce((a,s) => a + Math.max(0, (toMin(s.end)??0) - (toMin(s.start)??0)), 0);
 
   m.innerHTML = `
   <div class="card">
     <div class="instr">
-      <h2>👤 ${esc(inst.name)} <small style="font-weight:400;color:var(--mut);font-size:.85rem">${inst.phone ? '📞 ' + esc(inst.phone) : ''}</small></h2>
+      <h2>👤 ${esc(inst.name)} <small style="font-weight:400;color:var(--mut);font-size:.85rem">${inst.phone ? '📞 ' + esc(inst.phone) + ' · ' : ''}🕘 ${workHours(inst).start}–${workHours(inst).end}${workHours(inst).own ? '' : ' (domyślne)'}</small></h2>
       <div class="row">
+        <button class="btn sec small" id="hoursInst">🕘 Godziny pracy</button>
         <button class="btn sec small" id="phoneInst">📞 ${inst.phone ? 'Telefon' : 'Dodaj telefon'}</button>
         <button class="btn sec small" id="renInst">✏️ Zmień nazwę</button>
         <button class="btn sec small" id="delInst">🗑️ Usuń</button>
@@ -396,6 +408,7 @@ function render() {
         </div>
       </div>
       <div class="row" style="margin-top:10px;align-items:flex-end">
+        <div style="width:100%;font-size:.85rem;color:var(--mut)">Domyślne godziny pracy – dla instruktorów, którzy nie mają ustawionych własnych (przycisk „🕘 Godziny pracy” przy instruktorze).</div>
         <div><label class="l">Pierwsza jazda od</label><input type="time" id="sStart" value="${db.settings.start}"></div>
         <div><label class="l">Ostatnia jazda do</label><input type="time" id="sEnd" value="${db.settings.end}"></div>
         <div><label class="l">Długość jazdy</label>
@@ -432,6 +445,16 @@ function render() {
     cur.inst = db.instructors[0]?.id || null; save(); render();
   };
   if ($('goOff')) $('goOff').onclick = e => { e.preventDefault(); cur.view = 'off'; cur.offInst = cur.inst; cur.offDate = cur.date; render(); };
+  $('hoursInst').onclick = async () => {
+    const wh = workHours(inst);
+    const r = await modal({ title:'🕘 Godziny pracy – ' + esc(inst.name),
+      text:`Od której do której instruktor jeździ. Według tych godzin powstaje siatka dnia. Puste pola = godziny domyślne z ustawień (${db.settings.start}–${db.settings.end}).`,
+      fields:[{ label:'Od', type:'time', value:inst.start || '' }, { label:'Do', type:'time', value:inst.end || '' }], ok:'Zapisz',
+      check: v => (!v[0] && !v[1]) ? '' : (!v[0] || !v[1] ? 'Wpisz obie godziny albo zostaw obie puste.' : (toMin(v[1]) <= toMin(v[0]) ? 'Koniec musi być po początku.' : '')) });
+    if (!r) return;
+    if (r[0] && r[1]) { inst.start = r[0]; inst.end = r[1]; } else { delete inst.start; delete inst.end; }
+    save(); render();
+  };
   $('phoneInst').onclick = () => {
     const n = prompt(`Numer telefonu (WhatsApp) instruktora ${inst.name}:`, inst.phone || '+48 ');
     if (n === null) return;
@@ -443,7 +466,7 @@ function render() {
   $('viewToggle').onclick = () => { db.settings.grid = !db.settings.grid; save(); render(); };
   if ($('addSlot')) $('addSlot').onclick = () => {
     const d = ensureDay();
-    const last = d.length ? Math.max(...d.map(x => toMin(x.end) ?? 0), toMin(db.settings.end)) : toMin(db.settings.end);
+    const last = d.length ? Math.max(...d.map(x => toMin(x.end) ?? 0), toMin(workHours(inst).end)) : toMin(workHours(inst).end);
     d.push({ id:uid(), start:toTime(last), end:toTime(last + nLen), name:'', note:'' });
     save(); render();
     document.querySelector(`.slot[data-id="${d[d.length-1].id}"] .name`)?.focus();
@@ -541,7 +564,7 @@ function modal({ title, text = '', fields = [], ok = 'OK', check }) {
   return new Promise(resolve => {
     const bg = document.createElement('div'); bg.className = 'modal-bg';
     bg.innerHTML = `<form class="modal"><h3>${title}</h3>${text ? `<p>${text}</p>` : ''}
-      ${fields.map((f, i) => `<input type="${f.type || 'password'}" placeholder="${esc(f.label)}" data-i="${i}" autocomplete="off">`).join('')}
+      ${fields.map((f, i) => `${f.type === 'time' ? `<label class="l">${esc(f.label)}</label>` : ''}<input type="${f.type || 'password'}" placeholder="${esc(f.label)}" value="${esc(f.value || '')}" data-i="${i}" autocomplete="off">`).join('')}
       <div class="err"></div>
       <div class="row"><button type="button" class="btn sec small" data-x>Anuluj</button><button class="btn small">${ok}</button></div></form>`;
     document.body.appendChild(bg);
@@ -667,7 +690,7 @@ function renderOff() {
       <div><label class="l">Do dnia (dla kilku dni, np. urlop)</label><input type="date" id="oDate2"></div>
       <div class="full">
         <label class="l">Godziny wolnego</label>
-        <label class="allday"><input type="checkbox" id="oAll"> Cały dzień (${db.settings.start}–${db.settings.end})</label>
+        <label class="allday"><input type="checkbox" id="oAll"> Cały dzień (<span id="oAllH">${workHours(db.instructors.find(i => i.id === instSel)).start}–${workHours(db.instructors.find(i => i.id === instSel)).end}</span>)</label>
         <div id="oRanges"></div>
         <button type="button" class="btn sec small" id="oMore" style="margin-top:6px">＋ Dodaj kolejne godziny</button>
       </div>
@@ -693,13 +716,14 @@ function renderOff() {
   };
   addRange(); document.activeElement.blur();
   $('oMore').onclick = addRange;
+  $('oInst').onchange = e => { const wh = workHours(db.instructors.find(i => i.id === e.target.value)); $('oAllH').textContent = wh.start + '–' + wh.end; };
   $('oAll').onchange = e => { $('oRanges').style.display = $('oMore').style.display = e.target.checked ? 'none' : ''; };
   $('oAdd').onclick = () => {
     const id = $('oInst').value, d1 = $('oDate').value, d2 = $('oDate2').value || d1;
     if (!id || !d1) return alert('Wybierz instruktora i dzień.');
     if (d2 < d1) return alert('„Do dnia” nie może być wcześniej niż „Dzień”.');
     let ranges;
-    if ($('oAll').checked) ranges = [{ from:db.settings.start, to:db.settings.end }];
+    if ($('oAll').checked) { const wh = workHours(db.instructors.find(i => i.id === id)); ranges = [{ from:wh.start, to:wh.end }]; }
     else {
       ranges = [...document.querySelectorAll('#oRanges .orange')].map(r => ({ from:r.querySelector('.of').value, to:r.querySelector('.ot').value })).filter(r => r.from || r.to);
       if (!ranges.length) return alert('Wpisz godziny wolnego albo zaznacz „Cały dzień”.');
@@ -797,14 +821,14 @@ function exportExcel() {
   const months = [...new Set(Object.keys(db.days).map(k => k.split('|')[1].slice(0,7)))].sort();
   const p = [['Miesiąc','Instruktor','Dni','Jazd','Godzin']];
   months.forEach(ym => { const st = monthStats(ym); db.instructors.forEach(i => { const x = st[i.id]; if (x.rides) p.push([fmtMonth(ym), i.name, x.days.length, x.rides, Math.round(x.min/60*100)/100]); }); });
-  const ins = [['Instruktor','Telefon'], ...db.instructors.map(i => [i.name, i.phone || ''])];
+  const ins = [['Instruktor','Telefon','Pracuje od','Pracuje do'], ...db.instructors.map(i => [i.name, i.phone || '', i.start || '', i.end || ''])];
   const offRows = [['Instruktor','Data','Dzień','Od','Do','Powód']];
   Object.keys(db.off).sort((a,b) => a.split('|')[1].localeCompare(b.split('|')[1])).forEach(k => { const [id, date] = k.split('|'); if (!name(id)) return;
     offFor(id, date).forEach(o => offRows.push([name(id), date, dow(date), o.from, o.to, o.note])); });
   download(buildXlsx([
     { name:'Grafik', rows:g, widths:[24,12,13,10,10,28,28,9] },
     { name:'Podsumowanie', rows:p, widths:[18,24,8,8,10] },
-    { name:'Instruktorzy', rows:ins, widths:[30,18] },
+    { name:'Instruktorzy', rows:ins, widths:[30,18,12,12] },
     { name:'Wolne', rows:offRows, widths:[24,12,13,10,10,30] }
   ]), `grafik-automax-${todayStr()}.xlsx`);
 }
@@ -907,7 +931,8 @@ function importExcel() {
       if (!confirm(`Wczytać z Excela ${parsed.length} terminów (${dayCount} dni)?${skipped ? `\nPominięto ${skipped} wierszy z błędną datą lub godziną.` : ''}\nDni z pliku zastąpią te same dni w programie.`)) return;
       if (!(await requirePassword('Wczytanie kopii z Excela zastąpi dni zapisane w programie.'))) return;
       extraNames.forEach(getInst);
-      if (si) si.rows.slice(1).forEach(r => { const nm = String(r[0] ?? '').trim(), ph = String(r[1] ?? '').trim(); if (nm && ph) getInst(nm).phone = ph; });
+      if (si) si.rows.slice(1).forEach(r => { const nm = String(r[0] ?? '').trim(); if (!nm) return; const i = getInst(nm), ph = String(r[1] ?? '').trim(), a = cellTime(r[2]), b = cellTime(r[3]);
+        if (ph) i.phone = ph; if (a && b && toMin(b) > toMin(a)) { i.start = a; i.end = b; } });
       parsed.forEach(p => { const i = getInst(p.nm), k = i.id + '|' + p.d; (days[k] = days[k] || []).push({ id:uid(), start:p.s, end:p.e, name:p.k, note:p.u }); n++; });
       Object.assign(db.days, days); cleanDays();
       const so = sheets.find(x => normName(x.name) === 'wolne');
