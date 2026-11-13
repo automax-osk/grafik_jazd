@@ -62,6 +62,8 @@
   .warn { color:var(--err); font-weight:600; }
   .empty { color:var(--mut); text-align:center; padding:30px 10px; }
   details summary { cursor:pointer; font-weight:600; }
+  .rel { display:inline-block; padding:7px 12px; border-radius:999px; font-weight:700; font-size:.9rem; background:#e3e8ef; color:var(--txt); white-space:nowrap; }
+  .rel.now { background:#2e7d32; color:#fff; }
   .saved { font-size:.8rem; color:var(--ok); opacity:0; transition:opacity .3s; }
   .saved.show { opacity:1; }
 
@@ -148,6 +150,12 @@ function parseD(s) { const [y,m,d] = s.split('-').map(Number); return new Date(y
 function addDays(s, n) { const d = parseD(s); d.setDate(d.getDate()+n); return todayStr(d); }
 function fmtLong(s) { const d = parseD(s); return `${d.getDate()} ${MIES[d.getMonth()]} ${d.getFullYear()}`; }
 function dow(s) { return DNI[parseD(s).getDay()]; }
+function relDay(s) {
+  const diff = Math.round((parseD(s) - parseD(todayStr())) / 86400000);
+  const map = { '-2':'Przedwczoraj', '-1':'Wczoraj', '0':'Dziś', '1':'Jutro', '2':'Pojutrze' };
+  if (map[diff] !== undefined) return map[diff];
+  const d = dow(s); return d.charAt(0).toUpperCase() + d.slice(1);
+}
 function toMin(t) { if (!t) return null; const [h,m] = t.split(':').map(Number); return h*60+m; }
 function toTime(m) { m = ((m % 1440) + 1440) % 1440; return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0'); }
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -219,7 +227,8 @@ function render() {
       <div class="datebig">${fmtLong(cur.date)}<small>${dow(cur.date)}</small></div>
       <button class="btn sec icon" id="next" title="Następny dzień">▶</button>
       <input type="date" id="pick" value="${cur.date}">
-      <button class="btn sec small" id="today">Dziś</button>
+      <span class="rel ${cur.date===todayStr()?'now':''}">${relDay(cur.date)}</span>
+      ${cur.date===todayStr() ? '' : '<button class="btn sec small" id="today" title="Wróć do dzisiejszego dnia">↺ Dziś</button>'}
     </div>
   </div>
 
@@ -284,7 +293,7 @@ function render() {
   // zdarzenia
   $('prev').onclick = () => { cur.date = addDays(cur.date,-1); render(); };
   $('next').onclick = () => { cur.date = addDays(cur.date, 1); render(); };
-  $('today').onclick = () => { cur.date = todayStr(); render(); };
+  if ($('today')) $('today').onclick = () => { cur.date = todayStr(); render(); };
   $('pick').onchange = e => { if (e.target.value) { cur.date = e.target.value; render(); } };
   $('renInst').onclick = () => { const n = prompt('Imię i nazwisko instruktora:', inst.name); if (n && n.trim()) { inst.name = n.trim(); save(); render(); } };
   $('delInst').onclick = () => {
