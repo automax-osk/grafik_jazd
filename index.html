@@ -78,6 +78,10 @@
   .offadd { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:10px; }
   .offadd input[type=time] { width:105px; padding:7px 6px; }
   .offadd #offNote { flex:1; min-width:150px; padding:7px 10px; }
+  .slot.virtual input.name::placeholder { color:#b3bcc8; }
+  .slot.virtual { opacity:.9; }
+  .slot.newride { background:#f2f8ff; border:1px dashed #90caf9; border-radius:10px; padding:8px 6px; margin-top:8px; }
+  .slot .addok { border:0; border-radius:8px; background:var(--ok); color:#fff; font-size:1.1rem; font-weight:700; cursor:pointer; height:38px; }
   .saved { font-size:.8rem; color:var(--ok); opacity:0; transition:opacity .3s; }
   .saved.show { opacity:1; }
 
@@ -183,6 +187,7 @@ const DNI = ['niedziela','poniedziałek','wtorek','środa','czwartek','piątek',
 const MIES = ['stycznia','lutego','marca','kwietnia','maja','czerwca','lipca','sierpnia','września','października','listopada','grudnia'];
 
 let db = load();
+cleanDays();
 db.off = db.off || {}; // wolne instruktorów: { 'instId|data': [{id, from, to, note}] }
 let cur = { inst: db.instructors[0]?.id || null, date: todayStr(), view:'day', month:null };
 
@@ -221,13 +226,27 @@ function defaultSlots() {
 }
 function dayKey(inst = cur.inst, date = cur.date) { return inst + '|' + date; }
 function getDay(inst = cur.inst, date = cur.date) { return db.days[dayKey(inst, date)] || null; }
-let pending = null; // domyślne sloty pokazane na ekranie dla niezapisanego dnia
 function ensureDay() {
   const k = dayKey();
-  if (!db.days[k]) db.days[k] = (pending && pending.key === k) ? pending.slots : defaultSlots();
+  if (!db.days[k]) db.days[k] = [];
   return db.days[k];
 }
-function slotsFor(inst, date) { return getDay(inst, date) || defaultSlots(); }
+function slotsFor(inst, date) { return getDay(inst, date) || []; }
+/* puste bloki siatki tam, gdzie nic nie jest zapisane */
+function virtualBlocks(real) {
+  return defaultSlots().filter(v => !real.some(r => { const a = toMin(r.start), b = toMin(r.end); return a != null && b != null && a < toMin(v.end) && toMin(v.start) < b; }))
+    .map(v => ({ ...v, virtual:true }));
+}
+/* sprzątanie: puste wpisy (bez kursanta i uwag) nie są przechowywane */
+function cleanDays() {
+  Object.keys(db.days).forEach(k => { db.days[k] = db.days[k].filter(x => x.name.trim() || x.note.trim()); if (!db.days[k].length) delete db.days[k]; });
+}
+/* podpowiedź godziny nowej jazdy: koniec ostatniej jazdy, z pominięciem wolnego instruktora */
+function suggestStart(real, offs) {
+  let t = real.length ? Math.max(...real.map(x => toMin(x.end) ?? 0)) : toMin(db.settings.start);
+  for (let i = 0; i < 5; i++) { const o = offs.find(o => toMin(o.from) <= t && t < toMin(o.to)); if (!o) break; t = toMin(o.to); }
+  return t;
+}
 
 /* ---------- zakładki ---------- */
 function renderTabs() {
@@ -262,12 +281,15 @@ function render() {
       <p style="margin-top:20px"><button class="btn sec small" onclick="importExcel()">📗 Wczytaj z Excela</button> <button class="btn sec small" onclick="importData()">📂 Wczytaj kopię (.json)</button></p></div>`;
     return;
   }
-  if (!getDay()) pending = { key:dayKey(), slots:defaultSlots() };
-  const slots = (getDay() || pending.slots).slice().sort((a,b) => (toMin(a.start)??0) - (toMin(b.start)??0));
-  const clashes = findClashes(slots);
-  const gaps = findGaps(slots), gapMin = gaps.reduce((a,g) => a + g.min, 0);
+  const grid = !!db.settings.grid;
+  const real = (getDay() || []).slice().sort((a,b) => (toMin(a.start)??0) - (toMin(b.start)??0));
+  const slots = (grid ? real.concat(virtualBlocks(real)) : real).sort((a,b) => (toMin(a.start)??0) - (toMin(b.start)??0));
+  const clashes = findClashes(real);
   const offs = offFor();
-  const filled = slots.filter(s => s.name.trim());
+  const filled = real.filter(s => s.name.trim());
+  const gaps = findGaps(slots);
+  const gF = findGaps(filled), gapMin = gF.reduce((a,g) => a + g.min, 0);
+  const nStart = suggestStart(filled, offs), nLen = Number(db.settings.len) || 120;
   const minutes = filled.reduce((a,s) => a + Math.max(0, (toMin(s.end)??0) - (toMin(s.start)??0)), 0);
 
   m.innerHTML = `
@@ -291,22 +313,36 @@ function render() {
 
   <div class="card">
     ${offs.length ? `<div class="offbanner">⛔ <b>${esc(inst.name)}</b> ma w tym dniu wolne – nie planować: <b>${offText(offs)}</b> <a href="#" id="goOff">zmień</a></div>` : ''}
+    <div class="row" style="justify-content:space-between;margin-bottom:8px">
+      <b style="font-size:.95rem">${grid ? '▦ Siatka godzin dnia' : '☰ Zaplanowane jazdy'}</b>
+      <button class="btn sec small" id="viewToggle" title="Przełącz widok">${grid ? '☰ Pokaż tylko jazdy' : '▦ Pokaż siatkę godzin'}</button>
+    </div>
     <div class="hdr"><div>Początek</div><div></div><div>Koniec</div><div>Kursant (imię i nazwisko)</div><div>Uwagi / telefon / miejsce</div><div></div></div>
     <div id="slots">
       ${slots.map((s, i) => `
-      <div class="slot ${s.name.trim()?'filled':''} ${clashes.has(s.id)?'clash':''} ${offHit(s, offs).length?'offslot':''}" data-id="${s.id}">
+      <div class="slot ${s.name.trim()?'filled':''} ${s.virtual?'virtual':''} ${clashes.has(s.id)?'clash':''} ${offHit(s, offs).length?'offslot':''}" ${s.virtual ? `data-v="1"` : `data-id="${s.id}"`}>
         <input type="time" class="st" value="${esc(s.start)}" step="300">
         <div class="dash">–</div>
         <input type="time" class="en" value="${esc(s.end)}" step="300">
         <input class="name" placeholder="Imię i nazwisko kursanta" value="${esc(s.name)}" autocomplete="off" list="kursanci">
         <input class="note" placeholder="Uwagi" value="${esc(s.note)}">
-        <button class="del" title="Usuń ten termin">✕</button>
-      </div>${offHit(s, offs).length ? `<div class="offwarn ${s.name.trim() ? 'bad' : ''}">⛔ ${s.name.trim() ? 'Uwaga: jazda w czasie wolnym instruktora' : 'Wolne instruktora – nie planować'}: ${offText(offHit(s, offs))}</div>` : ''}${gaps.filter(g => g.after === i).map(g => `<div class="gap">☕ Przerwa <b>${fmtDur(g.min)}</b> <span>${g.from} – ${g.to}</span></div>`).join('')}`).join('') || '<div class="empty">Brak terminów w tym dniu.</div>'}
+        ${s.virtual ? '<span></span>' : '<button class="del" title="Usuń ten termin">✕</button>'}
+      </div>${offHit(s, offs).length ? `<div class="offwarn ${s.name.trim() ? 'bad' : ''}">⛔ ${s.name.trim() ? 'Uwaga: jazda w czasie wolnym instruktora' : 'Wolne instruktora – nie planować'}: ${offText(offHit(s, offs))}</div>` : ''}${gaps.filter(g => g.after === i).map(g => `<div class="gap">☕ Przerwa <b>${fmtDur(g.min)}</b> <span>${g.from} – ${g.to}</span></div>`).join('')}`).join('') || (grid ? '<div class="empty">Brak terminów w tym dniu.</div>' : '')}
     </div>
+    ${grid ? '' : `
+    <div class="slot newride" id="newRide">
+      <input type="time" class="st" id="nSt" value="${toTime(nStart)}" step="300">
+      <div class="dash">–</div>
+      <input type="time" class="en" id="nEn" value="${toTime(nStart + nLen)}" step="300">
+      <input class="name" id="nName" placeholder="＋ Nowa jazda – imię i nazwisko kursanta" autocomplete="off" list="kursanci">
+      <input class="note" id="nNote" placeholder="Uwagi">
+      <button class="addok" id="nAdd" title="Zatwierdź (Enter)">✓</button>
+    </div>
+    <div class="lock" style="margin-top:4px">${filled.length ? '' : 'Brak jazd w tym dniu. '}Wpisz kursanta i naciśnij <b>Enter</b> lub <b>✓</b> – pojawi się kolejna rubryka. Godziny podpowiadają się same i można je zmienić.</div>`}
     <datalist id="kursanci">${allNames().map(n => `<option value="${esc(n)}">`).join('')}</datalist>
     <div class="row" style="margin-top:12px">
-      <button class="btn small" id="addSlot">＋ Dodaj termin</button>
-      <button class="btn sec small" id="resetDay">↺ Przywróć domyślny podział</button>
+      ${grid ? '<button class="btn small" id="addSlot">＋ Dodaj termin</button>' : ''}
+      ${real.length ? '<button class="btn sec small" id="resetDay">🗑️ Wyczyść dzień</button>' : ''}
       <span class="saved" id="saved">✓ zapisano</span>
     </div>
     ${clashes.size ? '<div class="sum"><span class="warn">⚠️ Terminy nachodzą na siebie – sprawdź godziny</span></div>' : ''}
@@ -315,7 +351,7 @@ function render() {
       <div><span class="v">${fmtH(minutes)}</span> <span class="k">godz. jazd</span></div>
       <div><span class="v">${filled.length}</span> <span class="k">${filled.length===1?'jazda':(filled.length%10>=2&&filled.length%10<=4&&(filled.length%100<10||filled.length%100>=20)?'jazdy':'jazd')}</span></div>
       ${filled.length ? `<div class="k">od ${filled[0].start} do ${filled[filled.length-1].end}</div>` : ''}
-      ${gaps.length ? `<div class="k" style="width:100%">☕ Przerwy: <b>${gaps.map(g => `${g.from}–${g.to} (${fmtDur(g.min)})`).join(', ')}</b> · razem ${fmtDur(gapMin)}</div>` : ''}
+      ${gF.length ? `<div class="k" style="width:100%">☕ Przerwy: <b>${gF.map(g => `${g.from}–${g.to} (${fmtDur(g.min)})`).join(', ')}</b> · razem ${fmtDur(gapMin)}</div>` : ''}
     </div>
   </div>
 
@@ -374,41 +410,65 @@ function render() {
     cur.inst = db.instructors[0]?.id || null; save(); render();
   };
   if ($('goOff')) $('goOff').onclick = e => { e.preventDefault(); cur.view = 'off'; cur.offInst = cur.inst; cur.offDate = cur.date; render(); };
-  $('addSlot').onclick = () => {
+  $('viewToggle').onclick = () => { db.settings.grid = !db.settings.grid; save(); render(); };
+  if ($('addSlot')) $('addSlot').onclick = () => {
     const d = ensureDay();
-    const last = d.length ? d.reduce((a,s) => Math.max(a, toMin(s.end) ?? 0), 0) : toMin(db.settings.start);
-    const len = Number(db.settings.len) || 120;
-    d.push({ id:uid(), start:toTime(last), end:toTime(last+len), name:'', note:'' });
+    const last = d.length ? Math.max(...d.map(x => toMin(x.end) ?? 0), toMin(db.settings.end)) : toMin(db.settings.end);
+    d.push({ id:uid(), start:toTime(last), end:toTime(last + nLen), name:'', note:'' });
     save(); render();
-    const rows = document.querySelectorAll('.slot'); rows[rows.length-1]?.querySelector('.name').focus();
+    document.querySelector(`.slot[data-id="${d[d.length-1].id}"] .name`)?.focus();
   };
-  $('resetDay').onclick = async () => {
+  if ($('resetDay')) $('resetDay').onclick = async () => {
     const d = getDay();
     if (d && d.some(s => s.name.trim())) {
-      if (!confirm('Wpisani kursanci w tym dniu zostaną usunięci. Kontynuować?')) return;
-      if (!(await requirePassword('Kasowanie wpisanych jazd w tym dniu.'))) return;
+      if (!confirm('Wszystkie jazdy w tym dniu zostaną usunięte. Kontynuować?')) return;
+      if (!(await requirePassword('Kasowanie wszystkich jazd w tym dniu.'))) return;
     }
     delete db.days[dayKey()]; save(); render();
   };
-  document.querySelectorAll('.slot').forEach(row => {
-    const id = row.dataset.id;
-    const upd = (f, v, rerender) => { const d = ensureDay(); const s = d.find(x => x.id === id); if (s) { s[f] = v; save(); } if (rerender) render(); };
-    row.querySelector('.st').onchange = e => {
-      const d = ensureDay(); const s = d.find(x => x.id === id);
-      if (s) { const len = (toMin(s.end) ?? 0) - (toMin(s.start) ?? 0); s.start = e.target.value; if (len > 0 && e.target.value) s.end = toTime(toMin(s.start) + len); save(); }
-      render();
+  // nowa jazda (widok listy)
+  if ($('newRide')) {
+    const add = () => {
+      const st = $('nSt').value, en = $('nEn').value, name = $('nName').value.trim();
+      if (!name) { $('nName').focus(); $('nName').classList.add('shake'); setTimeout(() => $('nName')?.classList.remove('shake'), 400); return; }
+      if (!st || !en || toMin(en) <= toMin(st)) { alert('Sprawdź godziny – koniec musi być po początku.'); return; }
+      ensureDay().push({ id:uid(), start:st, end:en, name, note:$('nNote').value.trim() });
+      save(); render(); $('nName')?.focus();
     };
-    row.querySelector('.en').onchange = e => upd('end', e.target.value, true);
-    row.querySelector('.name').oninput = e => { upd('name', e.target.value); row.classList.toggle('filled', !!e.target.value.trim()); };
-    row.querySelector('.name').onchange = () => render();
-    row.querySelector('.note').oninput = e => upd('note', e.target.value);
-    row.querySelector('.del').onclick = async () => {
-      const d = ensureDay(); const s = d.find(x => x.id === id);
+    $('nAdd').onclick = add;
+    ['nName','nNote'].forEach(id => $(id).onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+    $('nSt').onchange = e => { if (e.target.value) $('nEn').value = toTime(toMin(e.target.value) + nLen); };
+  }
+  document.querySelectorAll('#slots .slot').forEach(row => {
+    // pusty blok siatki staje się prawdziwym wpisem przy pierwszej zmianie
+    const get = () => {
+      const d = ensureDay();
+      if (!row.dataset.id) {
+        const n = { id:uid(), start:row.querySelector('.st').value, end:row.querySelector('.en').value, name:'', note:'' };
+        d.push(n); row.dataset.id = n.id; delete row.dataset.v;
+      }
+      return d.find(x => x.id === row.dataset.id);
+    };
+    const tidy = () => { cleanDays(); save(); render(); };
+    row.querySelector('.st').onchange = e => {
+      const s = get(); const len = (toMin(s.end) ?? 0) - (toMin(s.start) ?? 0);
+      s.start = e.target.value; if (len > 0 && e.target.value) s.end = toTime(toMin(s.start) + len);
+      save(); render();
+    };
+    row.querySelector('.en').onchange = e => { get().end = e.target.value; save(); render(); };
+    row.querySelector('.name').oninput = e => { get().name = e.target.value; save(); row.classList.toggle('filled', !!e.target.value.trim()); };
+    row.querySelector('.name').onchange = tidy;
+    row.querySelector('.note').oninput = e => { get().note = e.target.value; save(); };
+    row.querySelector('.note').onchange = tidy;
+    const del = row.querySelector('.del');
+    if (del) del.onclick = async () => {
+      const d = ensureDay(); const s = d.find(x => x.id === row.dataset.id);
       if (s && s.name.trim()) {
-        if (!confirm(`Usunąć termin ${s.start}–${s.end} (${s.name})?`)) return;
+        if (!confirm(`Usunąć jazdę ${s.start}–${s.end} (${s.name})?`)) return;
         if (!(await requirePassword(`Kasowanie jazdy ${s.start}–${s.end} (${esc(s.name)}).`))) return;
       }
-      db.days[dayKey()] = d.filter(x => x.id !== id); save(); render();
+      db.days[dayKey()] = d.filter(x => x.id !== row.dataset.id); if (!db.days[dayKey()].length) delete db.days[dayKey()];
+      save(); render();
     };
   });
   $('sStart').onchange = e => { db.settings.start = e.target.value || '06:00'; save(); render(); };
@@ -797,7 +857,7 @@ function importExcel() {
       if (!(await requirePassword('Wczytanie kopii z Excela zastąpi dni zapisane w programie.'))) return;
       extraNames.forEach(getInst);
       parsed.forEach(p => { const i = getInst(p.nm), k = i.id + '|' + p.d; (days[k] = days[k] || []).push({ id:uid(), start:p.s, end:p.e, name:p.k, note:p.u }); n++; });
-      Object.assign(db.days, days);
+      Object.assign(db.days, days); cleanDays();
       const so = sheets.find(x => normName(x.name) === 'wolne');
       if (so && so.rows.length > 1) {
         const offs = {};
@@ -896,6 +956,7 @@ function importData() {
         const keepPw = db.settings.pwHash;
         db = Object.assign({ settings:{ start:'06:00', end:'22:00', len:120 } }, d);
         if (keepPw) db.settings.pwHash = keepPw; // obecne hasło zostaje
+        cleanDays();
         db.off = db.off || {};
         cur.inst = db.instructors[0]?.id || null; save(); render();
       } catch(e) { alert('To nie jest poprawny plik kopii grafiku.'); }
