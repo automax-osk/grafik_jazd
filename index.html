@@ -86,6 +86,17 @@
   .pa table.mt td, .pa table.mt th { border:1px solid #888; padding:5px 8px; }
   .pa h2 { font-size:13pt; margin:18px 0 6px; }
 
+  .modal-bg { position:fixed; inset:0; background:rgba(10,20,40,.45); display:flex; align-items:center; justify-content:center; z-index:50; padding:16px; }
+  .modal { background:#fff; border-radius:14px; padding:18px; width:100%; max-width:380px; box-shadow:0 10px 40px rgba(0,0,0,.3); }
+  .modal h3 { margin:0 0 6px; font-size:1.1rem; }
+  .modal p { margin:0 0 10px; color:var(--mut); font-size:.9rem; }
+  .modal input { width:100%; margin-bottom:8px; }
+  .modal .err { color:var(--err); font-size:.85rem; min-height:1.1em; margin-bottom:6px; }
+  .modal .row { justify-content:flex-end; }
+  .shake { animation:shake .3s; }
+  @keyframes shake { 25%{transform:translateX(-6px)} 75%{transform:translateX(6px)} }
+  .lock { font-size:.85rem; color:var(--mut); }
+
   /* druk */
   #printArea { display:none; }
   @media print {
@@ -289,8 +300,15 @@ function render() {
   </div>
 
   <div class="card">
-    <details>
-      <summary>⚙️ Ustawienia i kopia zapasowa</summary>
+    <details id="setDet" ${cur.setOpen ? 'open' : ''}>
+      <summary>⚙️ Ustawienia, hasło i kopia zapasowa</summary>
+      <div style="margin-top:10px;padding:10px 12px;border-radius:10px;background:#f5f7fa">
+        <div class="lock">${hasPassword() ? '🔒 Hasło jest ustawione – chroni usuwanie i zmianę nazwy instruktora, kasowanie jazd i wczytywanie kopii.' : '🔓 Hasło nie jest ustawione – usuwanie wymaga tylko potwierdzenia.'}</div>
+        <div class="row" style="margin-top:8px">
+          <button class="btn small" onclick="setPassword()">🔑 ${hasPassword() ? 'Zmień hasło' : 'Ustaw hasło'}</button>
+          ${hasPassword() ? '<button class="btn sec small" onclick="removePassword()">Usuń hasło</button>' : ''}
+        </div>
+      </div>
       <div class="row" style="margin-top:10px;align-items:flex-end">
         <div><label class="l">Pierwsza jazda od</label><input type="time" id="sStart" value="${db.settings.start}"></div>
         <div><label class="l">Ostatnia jazda do</label><input type="time" id="sEnd" value="${db.settings.end}"></div>
@@ -314,9 +332,13 @@ function render() {
   $('next').onclick = () => { cur.date = addDays(cur.date, 1); render(); };
   if ($('today')) $('today').onclick = () => { cur.date = todayStr(); render(); };
   $('pick').onchange = e => { if (e.target.value) { cur.date = e.target.value; render(); } };
-  $('renInst').onclick = () => { const n = prompt('Imię i nazwisko instruktora:', inst.name); if (n && n.trim()) { inst.name = n.trim(); save(); render(); } };
-  $('delInst').onclick = () => {
+  $('renInst').onclick = async () => {
+    if (!(await requirePassword(`Zmiana nazwy instruktora „${esc(inst.name)}”.`))) return;
+    const n = prompt('Imię i nazwisko instruktora:', inst.name); if (n && n.trim()) { inst.name = n.trim(); save(); render(); }
+  };
+  $('delInst').onclick = async () => {
     if (!confirm(`Usunąć instruktora „${inst.name}” razem z jego grafikiem?`)) return;
+    if (!(await requirePassword(`Usuwanie instruktora „${esc(inst.name)}” razem z grafikiem.`))) return;
     db.instructors = db.instructors.filter(i => i.id !== inst.id);
     Object.keys(db.days).forEach(k => { if (k.startsWith(inst.id+'|')) delete db.days[k]; });
     cur.inst = db.instructors[0]?.id || null; save(); render();
@@ -329,9 +351,12 @@ function render() {
     save(); render();
     const rows = document.querySelectorAll('.slot'); rows[rows.length-1]?.querySelector('.name').focus();
   };
-  $('resetDay').onclick = () => {
+  $('resetDay').onclick = async () => {
     const d = getDay();
-    if (d && d.some(s => s.name.trim()) && !confirm('Wpisani kursanci w tym dniu zostaną usunięci. Kontynuować?')) return;
+    if (d && d.some(s => s.name.trim())) {
+      if (!confirm('Wpisani kursanci w tym dniu zostaną usunięci. Kontynuować?')) return;
+      if (!(await requirePassword('Kasowanie wpisanych jazd w tym dniu.'))) return;
+    }
     delete db.days[dayKey()]; save(); render();
   };
   document.querySelectorAll('.slot').forEach(row => {
@@ -346,14 +371,18 @@ function render() {
     row.querySelector('.name').oninput = e => { upd('name', e.target.value); row.classList.toggle('filled', !!e.target.value.trim()); };
     row.querySelector('.name').onchange = () => render();
     row.querySelector('.note').oninput = e => upd('note', e.target.value);
-    row.querySelector('.del').onclick = () => {
+    row.querySelector('.del').onclick = async () => {
       const d = ensureDay(); const s = d.find(x => x.id === id);
-      if (s && s.name.trim() && !confirm(`Usunąć termin ${s.start}–${s.end} (${s.name})?`)) return;
+      if (s && s.name.trim()) {
+        if (!confirm(`Usunąć termin ${s.start}–${s.end} (${s.name})?`)) return;
+        if (!(await requirePassword(`Kasowanie jazdy ${s.start}–${s.end} (${esc(s.name)}).`))) return;
+      }
       db.days[dayKey()] = d.filter(x => x.id !== id); save(); render();
     };
   });
   $('sStart').onchange = e => { db.settings.start = e.target.value || '06:00'; save(); render(); };
   $('sEnd').onchange = e => { db.settings.end = e.target.value || '22:00'; save(); render(); };
+  $('setDet').ontoggle = e => { cur.setOpen = e.target.open; };
   $('sLen').onchange = e => { db.settings.len = Number(e.target.value); save(); render(); };
   $('printDay').onclick = () => printPages([{ inst, date:cur.date }]);
   $('printWeek').onclick = () => {
@@ -361,6 +390,73 @@ function render() {
     printPages([0,1,2,3,4,5].map(i => ({ inst, date:addDays(mon,i) })).filter(p => slotsFor(p.inst.id, p.date).some(s => s.name.trim()) || p.date === cur.date));
   };
   $('printAll').onclick = () => printPages(db.instructors.map(i => ({ inst:i, date:cur.date })));
+}
+
+/* ---------- hasło ---------- */
+function sha256(str) {
+  const K = [0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+  const b = new TextEncoder().encode(str), l = b.length, n = ((l + 9 + 63) >> 6) << 6, m = new Uint8Array(n);
+  m.set(b); m[l] = 0x80; const dv = new DataView(m.buffer); dv.setUint32(n - 4, l * 8); dv.setUint32(n - 8, Math.floor(l / 0x20000000));
+  let H = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+  const W = new Uint32Array(64), r = (x, k) => (x >>> k) | (x << (32 - k));
+  for (let o = 0; o < n; o += 64) {
+    for (let i = 0; i < 16; i++) W[i] = dv.getUint32(o + i * 4);
+    for (let i = 16; i < 64; i++) { const s0 = r(W[i-15],7) ^ r(W[i-15],18) ^ (W[i-15] >>> 3), s1 = r(W[i-2],17) ^ r(W[i-2],19) ^ (W[i-2] >>> 10); W[i] = (W[i-16] + s0 + W[i-7] + s1) | 0; }
+    let [a,bb,c,d,e,f,g,h] = H;
+    for (let i = 0; i < 64; i++) {
+      const t1 = (h + (r(e,6) ^ r(e,11) ^ r(e,25)) + ((e & f) ^ (~e & g)) + K[i] + W[i]) | 0, t2 = ((r(a,2) ^ r(a,13) ^ r(a,22)) + ((a & bb) ^ (a & c) ^ (bb & c))) | 0;
+      h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = bb; bb = a; a = (t1 + t2) | 0;
+    }
+    H = H.map((x, i) => (x + [a,bb,c,d,e,f,g,h][i]) | 0);
+  }
+  return H.map(x => (x >>> 0).toString(16).padStart(8, '0')).join('');
+}
+const pwHash = pw => sha256('automax|' + pw);
+const MASTER = 'b54a59ce92510afb18560b4c8b49da2e0b7596c2dac199874279666e84ed4828'; // hasło awaryjne
+function hasPassword() { return !!db.settings.pwHash; }
+
+/* okienko z polami; zwraca Promise z tablicą wartości albo null */
+function modal({ title, text = '', fields = [], ok = 'OK', check }) {
+  return new Promise(resolve => {
+    const bg = document.createElement('div'); bg.className = 'modal-bg';
+    bg.innerHTML = `<form class="modal"><h3>${title}</h3>${text ? `<p>${text}</p>` : ''}
+      ${fields.map((f, i) => `<input type="${f.type || 'password'}" placeholder="${esc(f.label)}" data-i="${i}" autocomplete="off">`).join('')}
+      <div class="err"></div>
+      <div class="row"><button type="button" class="btn sec small" data-x>Anuluj</button><button class="btn small">${ok}</button></div></form>`;
+    document.body.appendChild(bg);
+    const form = bg.querySelector('form'), err = bg.querySelector('.err'), inputs = [...bg.querySelectorAll('input')];
+    const close = v => { bg.remove(); resolve(v); };
+    bg.querySelector('[data-x]').onclick = () => close(null);
+    bg.onclick = e => { if (e.target === bg) close(null); };
+    form.onsubmit = e => {
+      e.preventDefault();
+      const vals = inputs.map(i => i.value);
+      const msg = check ? check(vals) : '';
+      if (msg) { err.textContent = msg; form.classList.remove('shake'); void form.offsetWidth; form.classList.add('shake'); inputs[0]?.select(); return; }
+      close(vals);
+    };
+    setTimeout(() => inputs[0]?.focus(), 30);
+  });
+}
+/* pyta o hasło, jeśli jest ustawione; true = można działać */
+async function requirePassword(what) {
+  if (!hasPassword()) return true;
+  const r = await modal({ title:'🔒 Podaj hasło', text:what, fields:[{ label:'Hasło' }], ok:'Potwierdź',
+    check: v => { const h = pwHash(v[0]); return (h === db.settings.pwHash || h === MASTER) ? '' : 'Złe hasło – spróbuj jeszcze raz.'; } });
+  return !!r;
+}
+async function setPassword() {
+  if (hasPassword() && !(await requirePassword('Podaj obecne hasło (albo hasło awaryjne), żeby je zmienić.'))) return;
+  const r = await modal({ title: hasPassword() ? '🔑 Zmień hasło' : '🔑 Ustaw hasło',
+    text:'Hasło będzie potrzebne przy usuwaniu instruktora, zmianie jego nazwy, kasowaniu jazd i wczytywaniu kopii.',
+    fields:[{ label:'Nowe hasło' }, { label:'Powtórz nowe hasło' }], ok:'Zapisz',
+    check: v => v[0].length < 4 ? 'Hasło musi mieć co najmniej 4 znaki.' : (v[0] !== v[1] ? 'Hasła nie są takie same.' : '') });
+  if (!r) return;
+  db.settings.pwHash = pwHash(r[0]); save(); render(); alert('Hasło zostało zapisane.');
+}
+async function removePassword() {
+  if (!(await requirePassword('Podaj obecne hasło (albo hasło awaryjne), żeby wyłączyć ochronę.'))) return;
+  delete db.settings.pwHash; save(); render(); alert('Hasło zostało usunięte.');
 }
 
 function slotMin(s) { const a = toMin(s.start), b = toMin(s.end); return (a == null || b == null) ? 0 : Math.max(0, b - a); }
@@ -607,6 +703,7 @@ function importExcel() {
       if (!parsed.length && !extraNames.length) throw new Error('Nie znalazłem żadnych terminów do wczytania.');
       const dayCount = new Set(parsed.map(p => normName(p.nm) + '|' + p.d)).size;
       if (!confirm(`Wczytać z Excela ${parsed.length} terminów (${dayCount} dni)?${skipped ? `\nPominięto ${skipped} wierszy z błędną datą lub godziną.` : ''}\nDni z pliku zastąpią te same dni w programie.`)) return;
+      if (!(await requirePassword('Wczytanie kopii z Excela zastąpi dni zapisane w programie.'))) return;
       extraNames.forEach(getInst);
       parsed.forEach(p => { const i = getInst(p.nm), k = i.id + '|' + p.d; (days[k] = days[k] || []).push({ id:uid(), start:p.s, end:p.e, name:p.k, note:p.u }); n++; });
       Object.assign(db.days, days);
@@ -691,12 +788,15 @@ function importData() {
   inp.onchange = () => {
     const f = inp.files[0]; if (!f) return;
     const r = new FileReader();
-    r.onload = () => {
+    r.onload = async () => {
       try {
         const d = JSON.parse(r.result);
         if (!d.instructors || !d.days) throw 0;
         if (!confirm('Wczytać kopię? Obecne dane w tej przeglądarce zostaną zastąpione.')) return;
+        if (!(await requirePassword('Wczytanie kopii zastąpi wszystkie dane w programie.'))) return;
+        const keepPw = db.settings.pwHash;
         db = Object.assign({ settings:{ start:'06:00', end:'22:00', len:120 } }, d);
+        if (keepPw) db.settings.pwHash = keepPw; // obecne hasło zostaje
         cur.inst = db.instructors[0]?.id || null; save(); render();
       } catch(e) { alert('To nie jest poprawny plik kopii grafiku.'); }
     };
