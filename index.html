@@ -88,6 +88,8 @@
   .wabox .log { margin-top:8px; font-size:.85rem; color:#2f4a3a; }
   .wabox .log .no { color:var(--mut); }
   .wabox .log .chg { color:#b45309; font-weight:600; }
+  .st-ok { color:#1f7a45; } .st-no { color:var(--mut); } .st-chg { color:#b45309; font-weight:600; }
+  table.mt tr.qnext td { background:#e9f9ef; }
   .toast { position:fixed; left:50%; bottom:24px; transform:translateX(-50%); background:#1c2430; color:#fff; padding:12px 16px; border-radius:10px; font-size:.92rem; z-index:60; max-width:92%; box-shadow:0 6px 20px rgba(0,0,0,.25); }
   .saved { font-size:.8rem; color:var(--ok); opacity:0; transition:opacity .3s; }
   .saved.show { opacity:1; }
@@ -268,9 +270,10 @@ function renderTabs() {
   const t = $('tabs');
   t.innerHTML = db.instructors.map(i => `<button class="tab ${i.id===cur.inst?'on':''}" data-id="${i.id}">${esc(i.name)}</button>`).join('')
     + `<button class="tab add" id="addInst">＋ Instruktor</button>`
-    + (db.instructors.length ? `<button class="tab month ${cur.view==='off'?'on':''}" id="offTab">⛔ Wolne</button><button class="tab month2 ${cur.view==='month'?'on':''}" id="monthTab">📊 Miesiąc</button>` : '');
-  if (cur.view === 'month' || cur.view === 'off') t.querySelectorAll('.tab[data-id]').forEach(b => b.classList.remove('on'));
+    + (db.instructors.length ? `<button class="tab month ${cur.view==='send'?'on':''}" id="sendTab">📲 Wysyłka</button><button class="tab month2 ${cur.view==='off'?'on':''}" id="offTab">⛔ Wolne</button><button class="tab month2 ${cur.view==='month'?'on':''}" id="monthTab">📊 Miesiąc</button>` : '');
+  if (['month','off','send'].includes(cur.view)) t.querySelectorAll('.tab[data-id]').forEach(b => b.classList.remove('on'));
   t.querySelectorAll('.tab[data-id]').forEach(b => b.onclick = () => { cur.inst = b.dataset.id; cur.view = 'day'; render(); });
+  if ($('sendTab')) $('sendTab').onclick = () => { cur.view = 'send'; cur.sendDate = cur.sendDate || addDays(todayStr(), 1); cur.sendQ = null; render(); };
   if ($('offTab')) $('offTab').onclick = () => { cur.view = 'off'; render(); };
   if ($('monthTab')) $('monthTab').onclick = () => { cur.view = 'month'; cur.month = cur.month || cur.date.slice(0,7); render(); };
   $('addInst').onclick = addInstructor;
@@ -289,6 +292,7 @@ function render() {
   const m = $('main');
   if (cur.view === 'month' && db.instructors.length) return renderMonth();
   if (cur.view === 'off' && db.instructors.length) return renderOff();
+  if (cur.view === 'send' && db.instructors.length) return renderSend();
   const inst = db.instructors.find(i => i.id === cur.inst);
   if (!inst) {
     m.innerHTML = `<div class="card empty"><p style="font-size:1.05rem">Nie ma jeszcze żadnego instruktora.</p>
@@ -1042,26 +1046,124 @@ function sendWA(inst, date, type) {
     if (!ph) toast('Instruktor nie ma wpisanego telefonu – w WhatsAppie wybierz kontakt ręcznie. Numer dodasz przyciskiem „📞 Dodaj telefon”.');
     return;
   }
-  const canvas = drawCard(inst, date), blob = dataUrlToBlob(canvas.toDataURL('image/png'));
-  const file = new File([blob], `grafik-${slug(inst.name)}-${date}.png`, { type:'image/png' });
+  const blob = dataUrlToBlob(drawCard(inst, date).toDataURL('image/png'));
+  sendImage(blob, `grafik-${slug(inst.name)}-${date}.png`, ph, 'Grafik pracy – ' + inst.name, () => logSent(inst, date, 'obraz'));
+}
+/* wysyłka obrazu: telefon – menu udostępniania; komputer – schowek + otwarcie czatu */
+function sendImage(blob, name, ph, title, onSent) {
+  const file = new File([blob], name, { type:'image/png' });
   const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
   if (mobile && navigator.canShare && navigator.canShare({ files:[file] })) {
-    navigator.share({ files:[file], title:'Grafik pracy – ' + inst.name })
-      .then(() => logSent(inst, date, 'obraz'))
+    navigator.share({ files:[file], title }).then(onSent)
       .catch(err => { if (err && err.name !== 'AbortError') toast('Nie udało się udostępnić obrazu: ' + esc(err.message)); });
     return;
   }
+  const where = ph ? 'W otwartym czacie WhatsApp' : 'W WhatsAppie otwórz właściwy czat (np. grupę instruktorów) i';
   if (navigator.clipboard && window.ClipboardItem) {
-    navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]).then(() => {
-      toast(`🖼️ <b>Obraz grafiku skopiowany.</b> W otwartym WhatsAppie naciśnij <b>Ctrl+V</b> i <b>Wyślij</b>.${ph ? '' : '<br>Instruktor nie ma telefonu – wybierz kontakt ręcznie.'}`, 9000);
-    }).catch(() => { download(blob, file.name); toast('Nie udało się skopiować obrazu – zapisałem go w Pobranych. Dołącz go w WhatsAppie (spinacz → zdjęcie).', 9000); });
-    window.open(base, '_blank');
-    logSent(inst, date, 'obraz');
-    return;
-  }
-  download(blob, file.name); window.open(base, '_blank'); logSent(inst, date, 'obraz');
-  toast('Obraz grafiku zapisany w Pobranych – dołącz go w WhatsAppie (spinacz → zdjęcie).', 9000);
+    navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+      .then(() => toast(`🖼️ <b>Obraz skopiowany.</b> ${where} naciśnij <b>Ctrl+V</b> i <b>Enter</b>.`, 9000))
+      .catch(() => { download(blob, name); toast('Nie udało się skopiować obrazu – zapisałem go w Pobranych. Dołącz go w WhatsAppie (spinacz → zdjęcie).', 9000); });
+  } else { download(blob, name); toast('Obraz zapisany w Pobranych – dołącz go w WhatsAppie (spinacz → zdjęcie).', 9000); }
+  if (ph) window.open('https://wa.me/' + ph, '_blank');
+  onSent();
 }
+/* ---------- zakładka Wysyłka: wszyscy instruktorzy naraz ---------- */
+function sentInfo(inst, date) {
+  const log = db.sent[inst.id + '|' + date] || [], last = log[log.length - 1];
+  if (!last) return { html:'<span class="st-no">✉️ nie wysłano</span>', state:'no' };
+  const f = new Date(last.at).toLocaleString('pl-PL', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+  if (last.sig !== daySig(inst, date)) return { html:`<span class="st-chg">⚠️ zmieniony po wysłaniu (${f})</span>`, state:'chg' };
+  return { html:`<span class="st-ok">✅ wysłano ${f} (${last.type})</span>`, state:'ok' };
+}
+function buildGroupText(date, list) {
+  const d = parseD(date);
+  const L = [`*AUTO-MAX – grafik pracy instruktorów*`, `_${dow(date)} ${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}_`];
+  list.forEach(inst => {
+    const { rides, gaps, offs, min } = dayData(inst, date);
+    L.push('', `👤 *${inst.name}* – ${rides.length} ${rideWord(rides.length)}, ${fmtH(min)} h`);
+    if (!rides.length) L.push('_brak jazd_');
+    rides.forEach((r, i) => { L.push(`*${r.start}-${r.end}* ${r.name}${r.note ? ` _(${r.note})_` : ''}`); gaps.filter(g => g.after === i).forEach(g => L.push(`_– przerwa ${fmtDur(g.min)} –_`)); });
+    if (offs.length) L.push(`⛔ Wolne: ${offs.map(o => `${o.from}-${o.to}`).join(', ')}`);
+  });
+  return L.join('\n');
+}
+function drawGroup(date, list) {
+  const cards = list.map(i => drawCard(i, date)), gap = 24;
+  const c = document.createElement('canvas'); c.width = cards[0].width; c.height = cards.reduce((a, k) => a + k.height, 0) + gap * (cards.length - 1);
+  const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
+  let y = 0; cards.forEach((k, n) => { x.drawImage(k, 0, y); y += k.height; if (n < cards.length - 1) { x.fillStyle = '#999'; x.fillRect(80, y + gap/2 - 2, c.width - 160, 4); y += gap; } });
+  return c;
+}
+function renderSend() {
+  const date = cur.sendDate || addDays(todayStr(), 1);
+  const skipEmpty = cur.sendSkip !== false;
+  const list = db.instructors.filter(i => !skipEmpty || dayData(i, date).rides.length);
+  const q = cur.sendQ && cur.sendQ.date === date ? cur.sendQ : null;
+  const nextInst = q && q.i < q.ids.length ? db.instructors.find(x => x.id === q.ids[q.i]) : null;
+  $('main').innerHTML = `
+  <div class="card">
+    <div class="datebar" style="margin-top:0">
+      <button class="btn sec icon" id="sPrev">◀</button>
+      <div class="datebig">${fmtLong(date)}<small style="text-transform:none">${dow(date).charAt(0).toUpperCase() + dow(date).slice(1)} · grafik do wysłania</small></div>
+      <button class="btn sec icon" id="sNext">▶</button>
+      <span class="rel ${date===todayStr()?'now':''}">${relDay(date)}</span>
+      <button class="btn sec small" id="sToday">Dziś</button>
+      <button class="btn sec small" id="sTom">Jutro</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin:0 0 4px;font-size:1.05rem">📲 Każdemu instruktorowi osobno</h2>
+    <p style="margin:0 0 10px;color:var(--mut);font-size:.88rem">Kliknij „Wyślij po kolei” – otworzy się czat pierwszego instruktora. Wyślij wiadomość, wróć tutaj i kliknij przycisk ponownie – otworzy się następny.</p>
+    <label class="lock"><input type="checkbox" id="sSkip" ${skipEmpty?'checked':''} style="width:auto;margin-right:4px">pomiń instruktorów bez jazd w tym dniu</label>
+    <table class="mt" style="margin-top:8px">
+      <thead><tr><th>Instruktor</th><th>Jazdy</th><th>Status</th><th></th></tr></thead>
+      <tbody>${list.map(i => { const d = dayData(i, date), st = sentInfo(i, date);
+        return `<tr class="${nextInst && nextInst.id === i.id ? 'qnext' : ''}">
+          <td><b>${esc(i.name)}</b><br><small style="color:var(--mut)">${i.phone ? '📞 ' + esc(i.phone) : '<a href="#" data-ph="' + i.id + '">＋ dodaj telefon</a>'}</small></td>
+          <td>${d.rides.length} · ${fmtH(d.min)} h</td>
+          <td style="font-size:.85rem">${st.html}</td>
+          <td style="white-space:nowrap;text-align:right"><button class="btn wa small" data-t="${i.id}" title="Wyślij tekst">💬</button> <button class="btn wa small" data-i="${i.id}" title="Wyślij obraz">🖼️</button></td></tr>`; }).join('') || '<tr><td colspan="4" class="empty">Nikt nie ma jazd w tym dniu.</td></tr>'}</tbody>
+    </table>
+    ${list.length ? `<div class="row" style="margin-top:12px">
+      ${nextInst
+        ? `<button class="btn wa" id="qGo">▶ Wyślij do: ${esc(nextInst.name)} (${q.i + 1}/${q.ids.length})</button><button class="btn sec small" id="qStop">Przerwij</button>`
+        : `<button class="btn wa" id="qText">▶ Wyślij wszystkim po kolei – tekst</button><button class="btn wa" id="qImg">▶ Wyślij wszystkim po kolei – obraz</button>
+           ${list.some(i => sentInfo(i, date).state !== 'ok') && list.some(i => sentInfo(i, date).state === 'ok') ? '<button class="btn sec small" id="qRest">Tylko niewysłane / zmienione</button>' : ''}`}
+      ${q && !nextInst ? '<span class="lock">✅ Wysłano do wszystkich z listy.</span>' : ''}
+    </div>` : ''}
+  </div>
+
+  <div class="card">
+    <h2 style="margin:0 0 4px;font-size:1.05rem">👥 Jedna wiadomość do grupy WhatsApp</h2>
+    <p style="margin:0 0 10px;color:var(--mut);font-size:.88rem">Grafik wszystkich instruktorów w jednej wiadomości – np. do grupy „Instruktorzy Auto-MAX”. Jedno kliknięcie, potem wybierasz grupę w WhatsAppie.</p>
+    <div class="row">
+      <button class="btn wa small" id="gText" ${list.length?'':'disabled'}>💬 Zbiorczy tekst</button>
+      <button class="btn wa small" id="gImg" ${list.length?'':'disabled'}>🖼️ Zbiorczy obraz</button>
+      <a href="#" id="gDl" style="font-size:.85rem;color:var(--c)">pobierz obraz</a>
+    </div>
+  </div>`;
+  const go = d => { cur.sendDate = d; cur.sendQ = null; render(); };
+  $('sPrev').onclick = () => go(addDays(date, -1)); $('sNext').onclick = () => go(addDays(date, 1));
+  $('sToday').onclick = () => go(todayStr()); $('sTom').onclick = () => go(addDays(todayStr(), 1));
+  $('sSkip').onchange = e => { cur.sendSkip = e.target.checked; cur.sendQ = null; render(); };
+  document.querySelectorAll('[data-ph]').forEach(a => a.onclick = e => { e.preventDefault(); const i = db.instructors.find(x => x.id === a.dataset.ph);
+    const n = prompt(`Numer telefonu (WhatsApp) instruktora ${i.name}:`, '+48 '); if (n && n.trim().replace(/^\+48\s*$/, '')) { i.phone = n.trim(); save(); render(); } });
+  document.querySelectorAll('[data-t]').forEach(b => b.onclick = () => sendWA(db.instructors.find(x => x.id === b.dataset.t), date, 'tekst'));
+  document.querySelectorAll('[data-i]').forEach(b => b.onclick = () => sendWA(db.instructors.find(x => x.id === b.dataset.i), date, 'obraz'));
+  const start = (type, ids) => { cur.sendQ = { date, type, ids, i:0 }; step(); };
+  const step = () => { const q = cur.sendQ, inst = db.instructors.find(x => x.id === q.ids[q.i]); q.i++; sendWA(inst, date, q.type); };
+  if ($('qText')) $('qText').onclick = () => start('tekst', list.map(i => i.id));
+  if ($('qImg')) $('qImg').onclick = () => start('obraz', list.map(i => i.id));
+  if ($('qRest')) $('qRest').onclick = () => start(cur.sendQ?.type || 'tekst', list.filter(i => sentInfo(i, date).state !== 'ok').map(i => i.id));
+  if ($('qGo')) $('qGo').onclick = step;
+  if ($('qStop')) $('qStop').onclick = () => { cur.sendQ = null; render(); };
+  const logAll = type => { list.forEach(i => { const k = i.id + '|' + date; (db.sent[k] = db.sent[k] || []).push({ at:new Date().toISOString(), type, sig:daySig(i, date) }); }); save(); render(); };
+  $('gText').onclick = () => { window.open('https://wa.me/?text=' + encodeURIComponent(buildGroupText(date, list)), '_blank'); logAll('grupa – tekst'); };
+  $('gImg').onclick = () => sendImage(dataUrlToBlob(drawGroup(date, list).toDataURL('image/png')), `grafik-instruktorzy-${date}.png`, '', 'Grafik instruktorów', () => logAll('grupa – obraz'));
+  $('gDl').onclick = e => { e.preventDefault(); if (list.length) download(dataUrlToBlob(drawGroup(date, list).toDataURL('image/png')), `grafik-instruktorzy-${date}.png`); };
+}
+
 function waBox(inst) {
   const log = (db.sent[inst.id + '|' + cur.date] || []);
   const last = log[log.length - 1], changed = last && last.sig !== daySig(inst, cur.date);
