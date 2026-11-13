@@ -64,6 +64,8 @@
   details summary { cursor:pointer; font-weight:600; }
   .rel { display:inline-block; padding:7px 12px; border-radius:999px; font-weight:700; font-size:.9rem; background:#e3e8ef; color:var(--txt); white-space:nowrap; }
   .rel.now { background:#2e7d32; color:#fff; }
+  .gap { margin:6px 0; padding:7px 12px; border-radius:8px; background:#fff4e0; border:1px dashed #f0a830; color:#8a5a00; font-size:.9rem; }
+  .gap span { color:#a9865a; margin-left:6px; }
   .saved { font-size:.8rem; color:var(--ok); opacity:0; transition:opacity .3s; }
   .saved.show { opacity:1; }
 
@@ -109,6 +111,13 @@
   .pa .sign { margin-top:50px; display:flex; justify-content:flex-end; font-size:9pt; }
   .pa .sign div { width:40%; border-top:1px solid #000; text-align:center; padding-top:3px; }
   .pa.week { page-break-after:always; }
+  .pa.bw, .pa.bw * { color:#000 !important; }
+  .pa.bw th { background:#fff; border:1px solid #000; }
+  .pa.bw td { border:1px solid #000; }
+  .pa.bw .ph { border-bottom:2px solid #000; }
+  .pa .school { font-size:16pt; font-weight:800; letter-spacing:.5px; }
+  .pa .school small { display:block; font-size:9pt; font-weight:400; letter-spacing:0; }
+  .pa tr.pgap td { padding:3px 8px; font-size:9.5pt; font-style:italic; text-align:center; border-style:dashed; }
 </style>
 </head>
 <body>
@@ -210,6 +219,7 @@ function render() {
   if (!getDay()) pending = { key:dayKey(), slots:defaultSlots() };
   const slots = (getDay() || pending.slots).slice().sort((a,b) => (toMin(a.start)??0) - (toMin(b.start)??0));
   const clashes = findClashes(slots);
+  const gaps = findGaps(slots), gapMin = gaps.reduce((a,g) => a + g.min, 0);
   const filled = slots.filter(s => s.name.trim());
   const minutes = filled.reduce((a,s) => a + Math.max(0, (toMin(s.end)??0) - (toMin(s.start)??0)), 0);
 
@@ -235,7 +245,7 @@ function render() {
   <div class="card">
     <div class="hdr"><div>Początek</div><div></div><div>Koniec</div><div>Kursant (imię i nazwisko)</div><div>Uwagi / telefon / miejsce</div><div></div></div>
     <div id="slots">
-      ${slots.map(s => `
+      ${slots.map((s, i) => `
       <div class="slot ${s.name.trim()?'filled':''} ${clashes.has(s.id)?'clash':''}" data-id="${s.id}">
         <input type="time" class="st" value="${esc(s.start)}" step="300">
         <div class="dash">–</div>
@@ -243,7 +253,7 @@ function render() {
         <input class="name" placeholder="Imię i nazwisko kursanta" value="${esc(s.name)}" autocomplete="off" list="kursanci">
         <input class="note" placeholder="Uwagi" value="${esc(s.note)}">
         <button class="del" title="Usuń ten termin">✕</button>
-      </div>`).join('') || '<div class="empty">Brak terminów w tym dniu.</div>'}
+      </div>${gaps.filter(g => g.after === i).map(g => `<div class="gap">☕ Przerwa <b>${fmtDur(g.min)}</b> <span>${g.from} – ${g.to}</span></div>`).join('')}`).join('') || '<div class="empty">Brak terminów w tym dniu.</div>'}
     </div>
     <datalist id="kursanci">${allNames().map(n => `<option value="${esc(n)}">`).join('')}</datalist>
     <div class="row" style="margin-top:12px">
@@ -257,6 +267,7 @@ function render() {
       <div><span class="v">${fmtH(minutes)}</span> <span class="k">godz. jazd</span></div>
       <div><span class="v">${filled.length}</span> <span class="k">${filled.length===1?'jazda':(filled.length%10>=2&&filled.length%10<=4&&(filled.length%100<10||filled.length%100>=20)?'jazdy':'jazd')}</span></div>
       ${filled.length ? `<div class="k">od ${filled[0].start} do ${filled[filled.length-1].end}</div>` : ''}
+      ${gaps.length ? `<div class="k" style="width:100%">☕ Przerwy: <b>${gaps.map(g => `${g.from}–${g.to} (${fmtDur(g.min)})`).join(', ')}</b> · razem ${fmtDur(gapMin)}</div>` : ''}
     </div>
   </div>
 
@@ -599,6 +610,18 @@ function importExcel() {
   inp.click();
 }
 
+function fmtDur(min) { const h = Math.floor(min/60), m = min % 60; return (h ? h + ' h' : '') + (h && m ? ' ' : '') + (m ? m + ' min' : ''); }
+/* przerwy między kolejnymi terminami (sloty posortowane): [{after:index, from, to, min}] */
+function findGaps(slots) {
+  const out = []; let maxEnd = null;
+  slots.forEach((s, i) => {
+    const st = toMin(s.start), en = toMin(s.end);
+    if (st == null || en == null) return;
+    if (maxEnd != null && st > maxEnd) out.push({ after:i-1, from:toTime(maxEnd), to:s.start, min:st - maxEnd });
+    maxEnd = maxEnd == null ? en : Math.max(maxEnd, en);
+  });
+  return out;
+}
 function findClashes(slots) {
   const bad = new Set();
   for (let i = 0; i < slots.length; i++) {
@@ -622,21 +645,22 @@ function allNames() {
 /* ---------- druk ---------- */
 function printPages(pages) {
   if (!pages.length) { alert('Brak jazd do wydruku.'); return; }
-  const logo = $('logo').querySelector('img').outerHTML;
   $('printArea').innerHTML = pages.map((p, idx) => {
     const slots = slotsFor(p.inst.id, p.date).slice().sort((a,b) => (toMin(a.start)??0) - (toMin(b.start)??0));
     const filled = slots.filter(s => s.name.trim());
     const min = filled.reduce((a,s) => a + Math.max(0, (toMin(s.end)??0) - (toMin(s.start)??0)), 0);
-    return `<div class="pa ${idx < pages.length-1 ? 'week' : ''}">
-      <div class="ph"><div class="lg">${logo}</div>
+    const gaps = findGaps(slots), gapMin = gaps.reduce((a,g) => a + g.min, 0);
+    return `<div class="pa bw ${idx < pages.length-1 ? 'week' : ''}">
+      <div class="ph"><div class="school">Szkoła Jazdy AUTO-MAX<small>Ośrodek Szkolenia Kierowców</small></div>
         <div class="r"><b>${fmtLong(p.date)}</b><span style="text-transform:capitalize">${dow(p.date)}</span></div></div>
       <h1>Grafik jazd – ${esc(p.inst.name)}</h1>
       <p class="dt">Dzień: ${dow(p.date)}, ${fmtLong(p.date)}</p>
       <table>
         <thead><tr><th>Godzina</th><th>Kursant</th><th>Uwagi</th></tr></thead>
-        <tbody>${slots.map(s => `<tr><td class="t">${esc(s.start)} – ${esc(s.end)}</td><td class="n">${esc(s.name)}</td><td>${esc(s.note)}</td></tr>`).join('')}</tbody>
+        <tbody>${slots.map((s, i) => `<tr><td class="t">${esc(s.start)} – ${esc(s.end)}</td><td class="n">${esc(s.name)}</td><td>${esc(s.note)}</td></tr>`
+          + gaps.filter(g => g.after === i).map(g => `<tr class="pgap"><td colspan="3">Przerwa ${fmtDur(g.min)} (${g.from} – ${g.to})</td></tr>`).join('')).join('')}</tbody>
       </table>
-      <div class="foot"><span><b>Podsumowanie dnia:</b> jazd: <b>${filled.length}</b> · godzin: <b>${fmtH(min)}</b>${filled.length ? ` (od ${filled[0].start} do ${filled[filled.length-1].end})` : ''}</span><span>Wydrukowano: ${new Date().toLocaleString('pl-PL')}</span></div>
+      <div class="foot"><span><b>Podsumowanie dnia:</b> jazd: <b>${filled.length}</b> · godzin: <b>${fmtH(min)}</b>${filled.length ? ` (od ${filled[0].start} do ${filled[filled.length-1].end})` : ''}${gaps.length ? ` · przerwy: <b>${fmtDur(gapMin)}</b>` : ''}</span><span>Wydrukowano: ${new Date().toLocaleString('pl-PL')}</span></div>
       <div class="sign"><div>podpis instruktora</div></div>
     </div>`;
   }).join('');
