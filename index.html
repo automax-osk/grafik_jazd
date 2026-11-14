@@ -457,7 +457,7 @@ function render() {
         <button class="btn sec small" onclick="exportData()">💾 Kopia .json</button>
         <button class="btn sec small" onclick="importData()">📂 Wczytaj .json</button>
       </div>
-      <p style="font-size:.8rem;color:var(--mut)">Dane zapisują się w tej przeglądarce na tym urządzeniu. Kopią w pliku przeniesiesz je na inny komputer lub telefon. Kopia .json i kopia w chmurze zawierają też rejestr PKK.<br>
+      <p style="font-size:.8rem;color:var(--mut)">Dane zapisują się w tej przeglądarce na tym urządzeniu. Kopią w pliku przeniesiesz je na inny komputer lub telefon. Kopia .json zawiera też rejestr PKK. W chmurze rejestr ma własną kopię, którą grafik pobiera automatycznie.<br>
         Plik Excela ma arkusz „Grafik” (kolumny: Instruktor, Data, Początek, Koniec, Kursant, Uwagi) – możesz go poprawić w Excelu i wczytać z powrotem. Wczytanie zastępuje tylko dni, które są w pliku.</p>
     </details>
   </div>`;
@@ -1469,15 +1469,17 @@ function applyData(d) {
   if (!db.instructors.some(i => i.id === cur.inst)) cur.inst = db.instructors[0]?.id || null;
 }
 /* kopia: grafik + rejestr PKK razem */
-function cloudPayload() { return JSON.stringify({ v:2, app:'automax', savedAt:new Date().toISOString(), grafik:db, pkk:pkkList() }); }
-function applyAny(d) {
-  if (d && d.v === 2 && d.grafik) {
+/* kopia w chmurze: tylko grafik (rejestr PKK ma własny plik w chmurze); kopia .json z dysku: grafik + rejestr */
+function cloudPayload() { return JSON.stringify({ v:3, app:'grafik', savedAt:new Date().toISOString(), grafik:db }); }
+function filePayload() { return JSON.stringify({ v:2, app:'automax', savedAt:new Date().toISOString(), grafik:db, pkk:pkkList() }); }
+function applyAny(d, withPkk) {
+  if (d && (d.v === 2 || d.v === 3) && d.grafik) {
     applyData(d.grafik);
-    if (Array.isArray(d.pkk)) try { localStorage.setItem(PKK_KEY, JSON.stringify(d.pkk)); } catch(e) {}
+    if (Array.isArray(d.pkk) && (withPkk || !pkkList().length)) try { localStorage.setItem(PKK_KEY, JSON.stringify(d.pkk)); localStorage.setItem('rejestr_pkk_changed', d.savedAt || new Date().toISOString()); } catch(e) {}
   } else applyData(d);
 }
 function exportData() {
-  const blob = new Blob([cloudPayload()], { type:'application/json' });
+  const blob = new Blob([filePayload()], { type:'application/json' });
   download(blob, `grafik-automax-${todayStr()}.json`);
 }
 function importData() {
@@ -1492,7 +1494,7 @@ function importData() {
         if (!g || !g.instructors || !g.days) throw 0;
         if (!confirm(`Wczytać kopię? Obecne dane w tej przeglądarce zostaną zastąpione${d.v === 2 && Array.isArray(d.pkk) ? ' (grafik i rejestr PKK)' : ''}.`)) return;
         if (!(await requirePassword('Wczytanie kopii zastąpi wszystkie dane w programie.'))) return;
-        applyAny(d); save(); render();
+        applyAny(d, true); save(); render();
       } catch(e) { alert('To nie jest poprawny plik kopii grafiku.'); }
     };
     r.readAsText(f);
@@ -1661,15 +1663,38 @@ async function cloudOpenCheck() {
           && await requirePassword('Wczytanie danych z chmury zastąpi dane w programie.')) {
         applyAny(await readCopy(cur0.id)); cloudSkip = true; save();
         cloud.lastSync = cur0.modifiedTime; saveCloud(); render(); toast('☁️ Wczytano najnowsze dane z chmury.');
-        cloudOpened = true; await dailyCheck(); return;
+        cloudOpened = true; await dailyCheck(); await pkkPull(); return;
       }
       cloud.lastSync = cur0.modifiedTime; saveCloud();
     }
     cloudOpened = true;
     await cloudPush(); // kopia poranna (+ ewentualna kopia dzienna za wczoraj)
+    await pkkPull();
   } catch(e) { if (e.needToken) { cloudNeedToken = true; cloudPending = true; } else setCloudErr(e.message); updateCloudStat(); }
 }
 setInterval(() => { if (cloudOn() && tokenOk() && !cloudBusy) dailyCheck().catch(e => setCloudErr(e.message)); }, 60000);
+/* rejestr PKK z innego komputera: grafik sam pobiera nowszą kopię rejestru (bez hasła – rejestru w grafiku się nie zmienia) */
+let pkkPulling = false;
+async function pkkPull() {
+  if (!cloudOn() || !tokenOk() || pkkPulling) return;
+  pkkPulling = true;
+  try {
+    const fid = await ensureFolder();
+    const q = `name='rejestr-pkk-biezacy.json' and '${fid}' in parents and trashed=false`;
+    const f = ((await (await gfetch(`${DRV}?q=${encodeURIComponent(q)}&fields=files(id,modifiedTime,appProperties)`)).json()).files || [])[0];
+    if (!f) return;
+    const remote = f.appProperties?.savedAt || f.modifiedTime, local = localStorage.getItem('rejestr_pkk_changed') || '';
+    if (remote <= local) return;
+    const d = JSON.parse(await (await gfetch(`${DRV}/${f.id}?alt=media`)).text());
+    const arr = Array.isArray(d) ? d : d.pkk; if (!Array.isArray(arr)) return;
+    localStorage.setItem(PKK_KEY, JSON.stringify(arr)); localStorage.setItem('rejestr_pkk_changed', remote);
+    if (!document.querySelector('.modal-bg') && !(document.activeElement && document.activeElement.matches('input,select,textarea'))) render();
+    toast(`🔄 Zaktualizowano rejestr PKK z chmury (kursantów: ${arr.length}, komputer: ${esc(f.appProperties?.device || 'inny')}).`);
+  } catch(e) { if (e.needToken) { cloudNeedToken = true; updateCloudStat(); } }
+  finally { pkkPulling = false; }
+}
+setInterval(pkkPull, 180000);
+window.addEventListener('focus', () => pkkPull());
 /* wygasłe połączenie: odnawiane przy najbliższym kliknięciu w programie */
 document.addEventListener('click', e => {
   if (!cloudNeedToken || !cloudOn() || e.target.closest('.modal-bg')) return;
@@ -1679,7 +1704,7 @@ document.addEventListener('click', e => {
 }, true);
 
 window.addEventListener('storage', e => {
-  if (e.key === PKK_KEY) { scheduleCloud(); if (!document.querySelector('.modal-bg') && !(document.activeElement && document.activeElement.matches('input,select,textarea'))) render(); }
+  if (e.key === PKK_KEY) { if (!document.querySelector('.modal-bg') && !(document.activeElement && document.activeElement.matches('input,select,textarea'))) render(); }
   if (e.key === CKEY) { try { const c = JSON.parse(e.newValue) || {}; Object.assign(cloud, { lastSave:c.lastSave, lastSync:c.lastSync, token:c.token, tokenExp:c.tokenExp }); updateCloudStat(); } catch(_) {} }
 });
 
@@ -1743,7 +1768,7 @@ async function cloudPull(pick) {
     } else if (!confirm(`Najnowsza kopia w chmurze:\n${fmtDT(f.modifiedTime)} (${f.appProperties?.device || '?'}).\n\nWczytać ją? Dane w programie zostaną zastąpione.`)) return;
     applyAny(await readCopy(f.id)); cloudSkip = true; save();
     cloud.lastSync = f.modifiedTime; cloud.lastErr = ''; saveCloud(); render();
-    toast('☁️ Wczytano kopię z chmury: ' + fmtDT(f.modifiedTime));
+    toast('☁️ Wczytano kopię z chmury: ' + fmtDT(f.modifiedTime)); pkkPull();
   } catch(e) { setCloudErr(e.message); render(); }
 }
 function cloudHelp() {
@@ -1763,6 +1788,7 @@ function cloudHelp() {
       <li>W programie: <b>⚙️ Ustawienia chmury</b> → wklej identyfikator, nadaj nazwę temu komputerowi (np. „biuro”) → <b>Zapisz</b>.</li>
       <li>Kliknij <b>🔗 Połącz z Dyskiem Google</b> i zaloguj się. Gotowe – w nagłówku pojawi się „☁️ kopia w chmurze: …”.</li>
       <li>Na <b>drugim komputerze</b> wpisz ten sam identyfikator, inną nazwę komputera (np. „dom”) i połącz – program sam zaproponuje wczytanie danych z chmury.</li>
+      <li><b>Rejestr PKK na innym komputerze:</b> w rejestrze, w ramce „☁️ Kopia rejestru w chmurze”, kliknij <b>Ustawienia</b>, wpisz ten sam identyfikator i tę samą nazwę folderu, potem <b>Połącz z Dyskiem Google</b> (tym samym kontem). Rejestr będzie zapisywał swoją kopię po każdej zmianie, a grafik sam pobierze nowych kursantów.</li>
     </ol>
     <p class="lock">Wskazówki: program musi być otwarty z adresu w internecie (GitHub), nie z pliku na dysku. Jeśli okno logowania się nie pokazuje – zezwól przeglądarce na wyskakujące okienka dla tej strony. Nazwy menu w Google mogą się nieco różnić.</p>
     <div class="row" style="justify-content:flex-end"><button class="btn small" data-x>Zamknij</button></div>
