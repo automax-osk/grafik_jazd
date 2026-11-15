@@ -56,6 +56,16 @@
   .msg.err { color:var(--err); }
   .foot { text-align:center; margin-top:14px; }
   .foot button { border:0; background:#fff; color:var(--c); border-radius:10px; padding:10px 18px; font-size:.95rem; font-weight:600; box-shadow:0 1px 3px rgba(0,0,0,.08); }
+  .search { position:relative; margin-bottom:10px; }
+  .search input { width:100%; padding:12px 40px 12px 14px; font-size:1rem; border:1px solid #cfd6df; border-radius:12px; background:#fff; font-family:inherit; }
+  .search button { position:absolute; right:6px; top:50%; transform:translateY(-50%); border:0; background:none; font-size:1.2rem; color:var(--mut); padding:6px; }
+  .res { padding:9px 2px; border-top:1px solid var(--line); cursor:pointer; }
+  .res:first-child { border-top:0; }
+  .res .dt { font-weight:700; }
+  .res .dt span { color:var(--mut); font-weight:500; font-size:.85rem; }
+  .res .tm2 { color:var(--c); font-weight:700; font-variant-numeric:tabular-nums; }
+  .res.past { opacity:.5; }
+  .hint { color:var(--mut); font-size:.85rem; margin:8px 2px 4px; }
   .warn { background:#fff8e1; color:#8d6e00; border-radius:10px; padding:8px 10px; font-size:.86rem; margin-bottom:10px; text-align:center; }
 </style>
 </head>
@@ -90,7 +100,8 @@ const hp = new URLSearchParams(location.hash.slice(1));
 if (hp.get('f') && hp.get('k')) { if (cfg.f !== hp.get('f')) cfg = { f:hp.get('f'), k:hp.get('k') }; else cfg.k = hp.get('k'); store(); }
 function store() { try { localStorage.setItem(SKEY, JSON.stringify(cfg)); } catch(e) {} }
 
-let data = cfg.data || null, view = 'today', day = todayStr(), offline = false, loading = false;
+let data = cfg.data || null, view = 'today', day = todayStr(), offline = false, loading = false, q = '';
+const norm = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ł/g, 'l').replace(/Ł/g, 'l').toLowerCase().trim();
 
 async function load() {
   if (!cfg.f || !cfg.k || loading) return render();
@@ -130,8 +141,26 @@ function dayHtml(date) {
   return h + `<div class="sum">Razem: <b>${rides.length} ${rideWord(rides.length)}, ${fmtH(min)} h</b></div>`;
 }
 
+function searchHtml() {
+  const words = norm(q).split(/\s+/).filter(Boolean), t = todayStr(), nowM = new Date().getHours()*60 + new Date().getMinutes();
+  const hits = [];
+  Object.keys((data && data.days) || {}).sort().forEach(d => ridesOf(d).forEach(r => {
+    const n = norm(r.name + ' ' + (r.note || ''));
+    if (words.every(w => n.includes(w))) hits.push({ d, r, past: d < t || (d === t && toMin(r.end) <= nowM) });
+  }));
+  if (!hits.length) return `<div class="card"><div class="empty">Nie znaleziono jazd dla „${esc(q)}”.<br><small>Grafik obejmuje ostatnie 7 dni i 3 miesiące naprzód.</small></div></div>`;
+  const next = hits.filter(h => !h.past), past = hits.filter(h => h.past).reverse();
+  const row = h => `<div class="res ${h.past ? 'past' : ''}" data-d="${h.d}"><div class="dt">${relDay(h.d).charAt(0).toUpperCase() + relDay(h.d).slice(1)}, ${fmtDay(h.d)} <span>${DNI[parseD(h.d).getDay()]}</span></div>
+    <div><span class="tm2">${esc(h.r.start)}–${esc(h.r.end)}</span> ${esc(h.r.name)}${h.r.note ? ` <small style="color:var(--mut)">(${esc(h.r.note)})</small>` : ''}</div></div>`;
+  const min = next.reduce((a, h) => a + Math.max(0, toMin(h.r.end) - toMin(h.r.start)), 0);
+  return `<div class="hint">Najbliższe jazdy: <b>${next.length}</b>${next.length ? ` (${fmtH(min)} h)` : ''}</div>
+    <div class="card">${next.length ? next.map(row).join('') : '<div class="empty">Brak zaplanowanych jazd naprzód.</div>'}</div>
+    ${past.length ? `<div class="hint">Ostatnie jazdy (7 dni)</div><div class="card">${past.map(row).join('')}</div>` : ''}`;
+}
+
 function render(errMsg) {
-  const m = $('main');
+  const m = $('main'), fq = document.activeElement && document.activeElement.id === 'q' ? document.activeElement.selectionStart : null;
+  setTimeout(() => { if (fq != null && $('q')) { $('q').focus(); try { $('q').setSelectionRange(fq, fq); } catch(e) {} } });
   if (data && data.name) { $('who').textContent = data.name; }
   $('upd').textContent = data && data.savedAt ? 'Grafik z: ' + new Date(data.savedAt).toLocaleString('pl-PL', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '';
   if (errMsg) { m.innerHTML = `<div class="card msg err">${errMsg}</div>`; return; }
@@ -139,6 +168,8 @@ function render(errMsg) {
   if (!data) { m.innerHTML = offline ? `<div class="card msg err">Brak internetu – nie udało się pobrać grafiku.</div>${footHtml()}` : `<div class="msg">Wczytywanie…</div>`; bindFoot(); return; }
   const t = todayStr();
   let h = offline ? `<div class="warn">📴 Brak internetu – pokazuję ostatnio pobrany grafik.</div>` : '';
+  h += `<div class="search"><input id="q" type="text" enterkeyhint="search" placeholder="🔍 Szukaj kursanta (imię lub nazwisko)" value="${esc(q)}" autocomplete="off">${q ? '<button id="qx" aria-label="Wyczyść">✕</button>' : ''}</div>`;
+  if (q.trim()) { m.innerHTML = h + searchHtml() + footHtml(); bindSearch(); bindFoot(); return; }
   h += `<div class="seg"><button data-v="today" class="${view==='today'?'on':''}">Dziś</button><button data-v="tom" class="${view==='tom'?'on':''}">Jutro</button><button data-v="week" class="${view==='week'?'on':''}">Tydzień</button></div>`;
   if (view === 'week') {
     for (let i = 0; i < 7; i++) {
@@ -157,7 +188,13 @@ function render(errMsg) {
   m.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { view = b.dataset.v; day = view === 'tom' ? addDays(todayStr(), 1) : todayStr(); render(); });
   m.querySelectorAll('[data-d]').forEach(c => c.onclick = () => { day = c.dataset.d; view = 'day'; render(); window.scrollTo(0, 0); });
   if ($('pv')) { $('pv').onclick = () => { day = addDays(day, -1); view = 'day'; render(); }; $('nx').onclick = () => { day = addDays(day, 1); view = 'day'; render(); }; }
-  bindFoot();
+  bindSearch(); bindFoot();
+}
+function bindSearch() {
+  const i = $('q'); if (!i) return;
+  i.oninput = () => { q = i.value; render(); };
+  if ($('qx')) $('qx').onclick = () => { q = ''; render(); };
+  $('main').querySelectorAll('.res[data-d]').forEach(c => c.onclick = () => { day = c.dataset.d; view = 'day'; q = ''; render(); window.scrollTo(0, 0); });
 }
 function footHtml() { return `<div class="foot"><button id="rf">↻ Odśwież</button></div>`; }
 function bindFoot() { if ($('rf')) $('rf').onclick = () => { $('rf').textContent = '↻ Odświeżanie…'; load(); }; }
