@@ -1383,7 +1383,8 @@ function renderSend() {
       <button class="btn wa small" id="gImg" ${list.length?'':'disabled'}>🖼️ Zbiorczy obraz</button>
       <a href="#" id="gDl" style="font-size:.85rem;color:var(--c)">pobierz obraz</a>
     </div>
-  </div>`;
+  </div>
+  ${instBox()}`;
   const go = d => { cur.sendDate = d; cur.sendQ = null; render(); };
   $('sPrev').onclick = () => go(addDays(date, -1)); $('sNext').onclick = () => go(addDays(date, 1));
   $('sToday').onclick = () => go(todayStr()); $('sTom').onclick = () => go(addDays(todayStr(), 1));
@@ -1505,7 +1506,7 @@ function importData() {
 /* ================= Kopia w chmurze – Dysk Google ================= */
 const CKEY = 'automax_cloud_v1';
 const CLOUD_DEF = { clientId:'', folder:'Auto-MAX – kopie grafiku', hour:'20:00', keep:30, auto:true, device:'komputer', email:'',
-  token:'', tokenExp:0, folderId:'', folderName:'', lastSave:'', lastSync:'', lastDaily:'', lastErr:'' };
+  token:'', tokenExp:0, folderId:'', folderName:'', lastSave:'', lastSync:'', lastDaily:'', lastErr:'', apiKey:'', instSig:{} };
 let cloud = (() => { try { return Object.assign({}, CLOUD_DEF, JSON.parse(localStorage.getItem(CKEY)) || {}); } catch(e) { return Object.assign({}, CLOUD_DEF); } })();
 function saveCloud() { try { localStorage.setItem(CKEY, JSON.stringify(cloud)); } catch(e) {} updateCloudStat(); }
 const cloudOn = () => !!(cloud.clientId && cloud.email);
@@ -1607,6 +1608,97 @@ async function listCopies() {
 }
 async function readCopy(id) { return JSON.parse(await (await gfetch(`${DRV}/${id}?alt=media`)).text()); }
 
+/* ---------- grafik w telefonie instruktora: osobny plik na Dysku dla każdego instruktora ---------- */
+/* w pliku są TYLKO jazdy i wolne danego instruktora (7 dni wstecz, 90 dni naprzód); link „każdy z linkiem może czytać” */
+function instPayload(inst) {
+  const from = addDays(todayStr(), -7), to = addDays(todayStr(), 90), list = pkkList(), days = {}, off = {};
+  Object.keys(db.days).forEach(k => {
+    const [id, d] = k.split('|'); if (id !== inst.id || d < from || d > to) return;
+    const r = db.days[k].filter(s => s.name.trim()).sort((a, b) => toMin(a.start) - toMin(b.start))
+      .map(s => { const kk = findK(s.name, list); return { start:s.start, end:s.end, name:s.name.trim(), note:(s.note || '').trim(), tel:(kk && kk.phone) || '' }; });
+    if (r.length) days[d] = r;
+  });
+  Object.keys(db.off).forEach(k => {
+    const [id, d] = k.split('|'); if (id !== inst.id || d < from || d > to) return;
+    const o = (db.off[k] || []).map(x => ({ from:x.from, to:x.to, note:x.note || '' }));
+    if (o.length) off[d] = o;
+  });
+  return { v:1, app:'grafik-instruktor', name:inst.name, days, off };
+}
+function instLink(inst) {
+  const base = location.protocol.startsWith('http') ? new URL('instruktor.html', location.href.split('#')[0]).href : 'https://automax-osk.github.io/grafik_jazd/instruktor.html';
+  return inst.share && inst.share.file ? `${base}#f=${inst.share.file}&k=${cloud.apiKey}` : '';
+}
+async function instUpload(inst, force) {
+  const body = instPayload(inst), sig = sha256(JSON.stringify(body)).slice(0, 16);
+  cloud.instSig = cloud.instSig || {};
+  if (!force && inst.share && inst.share.file && cloud.instSig[inst.id] === sig) return false;
+  const now = new Date().toISOString(), text = JSON.stringify({ ...body, savedAt:now });
+  const b = 'automax' + uid(), meta = { appProperties:{ device:cloud.device, savedAt:now } }, hd = { 'Content-Type':'multipart/related; boundary=' + b };
+  let id = inst.share && inst.share.file, created = false;
+  if (id) {
+    try { await gfetch(`${UPL}/${id}?uploadType=multipart&fields=id`, { method:'PATCH', headers:hd, body:multipart(b, meta, text) }); }
+    catch(e) { if (e.status !== 404) throw e; id = ''; }
+  }
+  if (!id) {
+    const folderId = await ensureFolder();
+    id = (await (await gfetch(`${UPL}?uploadType=multipart&fields=id`, { method:'POST', headers:hd,
+      body:multipart(b, { ...meta, name:`instruktor-${slug(inst.name)}-${inst.id}.json`, parents:[folderId], mimeType:'application/json' }, text) })).json()).id;
+    await gfetch(`${DRV}/${id}/permissions?fields=id`, { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ role:'reader', type:'anyone' }) });
+    const had = inst.share && inst.share.file;
+    inst.share = { file:id, at:now }; created = true; save();
+    if (had) toast(`⚠️ Plik grafiku instruktora <b>${esc(inst.name)}</b> zniknął z Dysku – utworzono nowy. <b>Wyślij mu nowy link</b> (zakładka Wysyłka).`, 12000);
+  }
+  cloud.instSig[inst.id] = sig; saveCloud();
+  return created;
+}
+async function instSyncAll() {
+  if (!cloud.apiKey) return;
+  for (const i of db.instructors) if (i.share && i.share.file) {
+    try { await instUpload(i); } catch(e) { if (e.needToken) throw e; console.warn('grafik instruktora', i.name, e); }
+  }
+}
+async function instCreate(id) {
+  const inst = db.instructors.find(x => x.id === id); if (!inst) return;
+  if (!cloudOn()) return alert('Najpierw połącz program z Dyskiem Google (ramka „☁️ Kopia w chmurze” w ustawieniach).');
+  if (!cloud.apiKey) return alert('Najpierw wpisz Klucz API Google w „⚙️ Ustawienia chmury”. Jak go zdobyć – „📖 Instrukcja konfiguracji”, punkty na końcu.');
+  if (!(await requirePassword(`Utworzenie linku do grafiku dla instruktora „${esc(inst.name)}”.`))) return;
+  try { await ensureToken(); await instUpload(inst, true); render(); toast(`🔗 Link dla <b>${esc(inst.name)}</b> gotowy – wyślij go przyciskiem 💬.`); }
+  catch(e) { alert('Nie udało się utworzyć linku: ' + e.message); }
+}
+async function instDisable(id) {
+  const inst = db.instructors.find(x => x.id === id); if (!inst || !inst.share) return;
+  if (!confirm(`Wyłączyć link do grafiku dla: ${inst.name}?\n\nStary link przestanie działać. Później możesz utworzyć nowy.`)) return;
+  if (!(await requirePassword(`Wyłączenie linku do grafiku instruktora „${esc(inst.name)}”.`))) return;
+  try { await ensureToken(); await gfetch(`${DRV}/${inst.share.file}`, { method:'DELETE' }).catch(e => { if (e.status !== 404) throw e; }); }
+  catch(e) { return alert('Nie udało się usunąć pliku z Dysku: ' + e.message); }
+  delete inst.share; if (cloud.instSig) delete cloud.instSig[inst.id]; saveCloud(); save(); render(); toast('⛔ Link wyłączony.');
+}
+function instSendLink(id) {
+  const inst = db.instructors.find(x => x.id === id); if (!inst) return;
+  const msg = `Cześć! To Twój grafik jazd w Auto-MAX – zawsze aktualny, widzisz w nim tylko swoje jazdy:\n${instLink(inst)}\n\nOtwórz w Chrome, potem ⋮ → „Dodaj do ekranu głównego” – będziesz mieć grafik jak aplikację.`;
+  window.open('https://wa.me/' + waPhone(inst.phone) + '?text=' + encodeURIComponent(msg), '_blank');
+}
+function instCopyLink(id) {
+  const inst = db.instructors.find(x => x.id === id), l = inst && instLink(inst); if (!l) return;
+  (navigator.clipboard ? navigator.clipboard.writeText(l) : Promise.reject()).then(() => toast('📋 Link skopiowany.')).catch(() => prompt('Skopiuj link:', l));
+}
+function instBox() {
+  const ready = cloudOn() && cloud.apiKey;
+  return `<div class="card">
+    <h2 style="margin:0 0 4px;font-size:1.05rem">📱 Grafik w telefonie instruktora</h2>
+    <p style="margin:0 0 10px;color:var(--mut);font-size:.88rem">Każdy instruktor dostaje własny link. Widzi w nim <b>tylko swoje</b> jazdy i wolne – zawsze aktualne, bo program po każdej zmianie odświeża jego plik na Dysku Google.</p>
+    ${!ready ? `<div class="lock" style="margin-bottom:8px">⚠️ Do działania potrzebne: ${cloudOn() ? '' : 'połączenie z Dyskiem Google'}${!cloudOn() && !cloud.apiKey ? ' oraz ' : ''}${cloud.apiKey ? '' : '<b>Klucz API Google</b> w „⚙️ Ustawienia chmury”'} – zobacz „📖 Instrukcja konfiguracji” (punkty na końcu).</div>` : ''}
+    <table class="mt"><thead><tr><th>Instruktor</th><th>Link</th><th></th></tr></thead><tbody>
+    ${db.instructors.map(i => i.share && i.share.file
+      ? `<tr><td><b>${esc(i.name)}</b></td><td style="font-size:.85rem"><span class="st-ok">✅ aktywny</span></td>
+         <td style="white-space:nowrap;text-align:right"><button class="btn wa small" onclick="instSendLink('${i.id}')" title="Wyślij link na WhatsApp" ${cloud.apiKey ? '' : 'disabled'}>💬</button> <button class="btn sec small" onclick="instCopyLink('${i.id}')" title="Kopiuj link" ${cloud.apiKey ? '' : 'disabled'}>📋</button> <button class="btn sec small" onclick="instDisable('${i.id}')" title="Wyłącz link">⛔</button></td></tr>`
+      : `<tr><td><b>${esc(i.name)}</b></td><td style="font-size:.85rem"><span class="st-no">brak</span></td>
+         <td style="text-align:right"><button class="btn small" onclick="instCreate('${i.id}')" ${ready ? '' : 'disabled'}>🔗 Utwórz link</button></td></tr>`).join('')}
+    </tbody></table>
+  </div>`;
+}
+
 /* zapis bieżącej kopii */
 async function cloudPush() {
   if (!cloudOn()) return;
@@ -1616,6 +1708,7 @@ async function cloudPush() {
     const r = await putFile(CUR_FILE, cloudPayload());
     cloud.lastSave = new Date().toISOString(); cloud.lastSync = r.modifiedTime || cloud.lastSave; cloud.lastErr = '';
     cloudNeedToken = false;
+    await instSyncAll();
     await dailyCheck();
   } catch(e) {
     if (e.needToken) { cloudNeedToken = true; cloudPending = true; } else cloud.lastErr = e.message;
@@ -1718,14 +1811,15 @@ async function cloudSettings() {
       { label:'Nazwa tego komputera (widoczna przy kopiach)', type:'text', value:cloud.device, ph:'np. biuro' },
       { label:'Godzina kopii dziennej', type:'time', value:cloud.hour },
       { label:'Ile dni trzymać kopie dzienne', type:'number', value:cloud.keep },
-      { label:'Zapisuj kopię automatycznie po każdej zmianie', type:'checkbox', value:cloud.auto }
+      { label:'Zapisuj kopię automatycznie po każdej zmianie', type:'checkbox', value:cloud.auto },
+      { label:'Klucz API Google – do grafiku w telefonie instruktora (zaczyna się od AIza)', type:'text', value:cloud.apiKey, ph:'AIza…' }
     ], ok:'Zapisz',
-    check: v => (v[0] && !/\.apps\.googleusercontent\.com$/.test(v[0].trim())) ? 'Klucz Google powinien kończyć się na .apps.googleusercontent.com' : (!v[1].trim() ? 'Podaj nazwę folderu.' : '') });
+    check: v => (v[0] && !/\.apps\.googleusercontent\.com$/.test(v[0].trim())) ? 'Klucz Google powinien kończyć się na .apps.googleusercontent.com' : (!v[1].trim() ? 'Podaj nazwę folderu.' : ((v[6] || '').trim() && !/^AIza[\w-]{30,}$/.test(v[6].trim()) ? 'Klucz API powinien zaczynać się od AIza (bez spacji).' : '')) });
   if (!r) return;
   const newId = r[0].trim();
   if (newId !== cloud.clientId) { tokenClient = null; Object.assign(cloud, { clientId:newId, email:'', token:'', tokenExp:0, folderId:'', lastSync:'', lastSave:'', lastDaily:'' }); }
   if (r[1].trim() !== cloud.folder) { cloud.folderId = ''; cloud.lastDaily = ''; }
-  Object.assign(cloud, { folder:r[1].trim(), device:r[2].trim() || 'komputer', hour:r[3] || '20:00', keep:Math.max(1, Number(r[4]) || 30), auto:!!r[5], lastErr:'' });
+  Object.assign(cloud, { folder:r[1].trim(), device:r[2].trim() || 'komputer', hour:r[3] || '20:00', keep:Math.max(1, Number(r[4]) || 30), auto:!!r[5], apiKey:(r[6] || '').trim(), lastErr:'' });
   saveCloud(); if (cloud.clientId) loadGIS().then(getTokenClient).catch(() => {});
   render(); toast('☁️ Zapisano ustawienia chmury.' + (cloud.clientId && !cloud.email ? ' Teraz kliknij „Połącz z Dyskiem Google”.' : ''));
 }
@@ -1790,6 +1884,16 @@ function cloudHelp() {
       <li>Na <b>drugim komputerze</b> wpisz ten sam identyfikator, inną nazwę komputera (np. „dom”) i połącz – program sam zaproponuje wczytanie danych z chmury.</li>
       <li><b>Rejestr PKK na innym komputerze:</b> w rejestrze, w ramce „☁️ Kopia rejestru w chmurze”, kliknij <b>Ustawienia</b>, wpisz ten sam identyfikator i tę samą nazwę folderu, potem <b>Połącz z Dyskiem Google</b> (tym samym kontem). Rejestr będzie zapisywał swoją kopię po każdej zmianie, a grafik sam pobierze nowych kursantów.</li>
     </ol>
+    <h3>📱 Grafik w telefonie instruktora – Klucz API</h3>
+    <ol>
+      <li>W tym samym projekcie w Google Cloud: <b>Interfejsy API i usługi → Dane logowania → Utwórz dane logowania → Klucz interfejsu API</b>.</li>
+      <li>Kliknij <b>Edytuj klucz</b> (albo nazwę klucza). <b>Ograniczenia aplikacji: Strony internetowe (odsyłające HTTP)</b> → dodaj:
+        <div class="copyrow"><code>${esc(origin)}/*</code></div></li>
+      <li><b>Ograniczenia interfejsu API: Ogranicz klucz</b> → zaznacz tylko <b>Google Drive API</b> → <b>Zapisz</b>.</li>
+      <li>Skopiuj klucz (zaczyna się od <code>AIza</code>) i wklej go w programie: <b>⚙️ Ustawienia chmury → Klucz API Google</b>.</li>
+      <li>Zakładka <b>Wysyłka</b> → ramka <b>📱 Grafik w telefonie instruktora</b> → <b>🔗 Utwórz link</b> przy instruktorze → <b>💬</b> wysyła mu link na WhatsApp.</li>
+    </ol>
+    <p class="lock">Klucz API nie daje dostępu do Twojego Dysku – pozwala tylko czytać pliki udostępnione przez link. Każdy instruktor ma osobny plik i nie zna linków innych. Gdy ktoś przestaje pracować, kliknij przy nim ⛔ – jego link przestanie działać.</p>
     <p class="lock">Wskazówki: program musi być otwarty z adresu w internecie (GitHub), nie z pliku na dysku. Jeśli okno logowania się nie pokazuje – zezwól przeglądarce na wyskakujące okienka dla tej strony. Nazwy menu w Google mogą się nieco różnić.</p>
     <div class="row" style="justify-content:flex-end"><button class="btn small" data-x>Zamknij</button></div>
   </div>`;
