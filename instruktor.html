@@ -66,6 +66,8 @@
   .res .tm2 { color:var(--c); font-weight:700; font-variant-numeric:tabular-nums; }
   .res.past { opacity:.5; }
   .hint { color:var(--mut); font-size:.85rem; margin:8px 2px 4px; }
+  .cat { display:inline-block; min-width:24px; padding:0 4px; border:2px solid currentColor; border-radius:5px; font-weight:800; font-size:.75rem; line-height:1.35; text-align:center; color:#1565c0; background:#fff; margin-right:6px; vertical-align:1px; }
+  .cat[data-c^="A"] { color:#2e7d32; } .cat[data-c^="C"] { color:#e65100; } .cat[data-c^="D"] { color:#6a1b9a; } .cat[data-c^="T"] { color:#5d4037; } .cat[data-c="BE"] { color:#0d47a1; }
   .warn { background:#fff8e1; color:#8d6e00; border-radius:10px; padding:8px 10px; font-size:.86rem; margin-bottom:10px; text-align:center; }
 </style>
 </head>
@@ -92,6 +94,7 @@ const fmtDur = min => { const h = Math.floor(min/60), m = min % 60; return (h ? 
 const rideWord = n => n === 1 ? 'jazda' : (n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 'jazdy' : 'jazd');
 const relDay = s => { const t = todayStr(); return s === t ? 'dziś' : s === addDays(t, 1) ? 'jutro' : s === addDays(t, -1) ? 'wczoraj' : DNI[parseD(s).getDay()]; };
 const fmtDay = s => { const d = parseD(s); return `${d.getDate()} ${MIES[d.getMonth()]}`; };
+const cb = r => r.cat ? `<span class="cat" data-c="${esc(r.cat)}">${esc(r.cat)}</span>` : '';
 const telHref = p => { let d = String(p || '').replace(/[^\d+]/g, ''); if (/^\d{9}$/.test(d)) d = '+48' + d; return d; };
 
 /* link: #f=<id pliku>&k=<klucz> – zapamiętywany w telefonie */
@@ -135,7 +138,7 @@ function dayHtml(date) {
     if (i) { const g = a - toMin(rides[i-1].end); if (g > 0) h += `<div class="gap">– przerwa ${fmtDur(g)} –</div>`; }
     const cls = isToday ? (nowM >= a && nowM < b ? 'now' : nowM >= b ? 'past' : '') : '';
     h += `<div class="ride ${cls}"><div class="tm">${esc(r.start)}–${esc(r.end)}<small>${fmtDur(Math.max(0, b - a))}</small></div>
-      <div class="who"><b>${esc(r.name)}</b>${r.note ? `<div class="note">${esc(r.note)}</div>` : ''}
+      <div class="who">${cb(r)}<b>${esc(r.name)}</b>${r.note ? `<div class="note">${esc(r.note)}</div>` : ''}
       ${r.tel ? `<a class="tel" href="tel:${esc(telHref(r.tel))}">📞 ${esc(r.tel)}</a>` : ''}</div></div>`;
   });
   return h + `<div class="sum">Razem: <b>${rides.length} ${rideWord(rides.length)}, ${fmtH(min)} h</b></div>`;
@@ -151,7 +154,7 @@ function searchHtml() {
   if (!hits.length) return `<div class="card"><div class="empty">Nie znaleziono jazd dla „${esc(q)}”.<br><small>Grafik obejmuje ostatnie 7 dni i 3 miesiące naprzód.</small></div></div>`;
   const next = hits.filter(h => !h.past), past = hits.filter(h => h.past).reverse();
   const row = h => `<div class="res ${h.past ? 'past' : ''}" data-d="${h.d}"><div class="dt">${relDay(h.d).charAt(0).toUpperCase() + relDay(h.d).slice(1)}, ${fmtDay(h.d)} <span>${DNI[parseD(h.d).getDay()]}</span></div>
-    <div><span class="tm2">${esc(h.r.start)}–${esc(h.r.end)}</span> ${esc(h.r.name)}${h.r.note ? ` <small style="color:var(--mut)">(${esc(h.r.note)})</small>` : ''}</div></div>`;
+    <div><span class="tm2">${esc(h.r.start)}–${esc(h.r.end)}</span> ${cb(h.r)}${esc(h.r.name)}${h.r.note ? ` <small style="color:var(--mut)">(${esc(h.r.note)})</small>` : ''}</div></div>`;
   const min = next.reduce((a, h) => a + Math.max(0, toMin(h.r.end) - toMin(h.r.start)), 0);
   return `<div class="hint">Najbliższe jazdy: <b>${next.length}</b>${next.length ? ` (${fmtH(min)} h)` : ''}</div>
     <div class="card">${next.length ? next.map(row).join('') : '<div class="empty">Brak zaplanowanych jazd naprzód.</div>'}</div>
@@ -177,7 +180,7 @@ function render(errMsg) {
       const min = rides.reduce((a, r) => a + Math.max(0, toMin(r.end) - toMin(r.start)), 0);
       h += `<div class="card wk ${i===0?'today':''}" data-d="${d}"><h3>${relDay(d).charAt(0).toUpperCase() + relDay(d).slice(1)}, ${fmtDay(d)}<span>${rides.length ? rides.length + ' ' + rideWord(rides.length) + ' · ' + fmtH(min) + ' h' : 'wolne od jazd'}</span></h3>
         ${offs.length ? `<div class="r">⛔ Wolne: ${offs.map(offLine).join(', ')}</div>` : ''}
-        ${rides.map(r => `<div class="r"><b>${esc(r.start)}–${esc(r.end)}</b> ${esc(r.name)}</div>`).join('')}</div>`;
+        ${rides.map(r => `<div class="r"><b>${esc(r.start)}–${esc(r.end)}</b> ${cb(r)}${esc(r.name)}</div>`).join('')}</div>`;
     }
   } else {
     const label = relDay(day);

@@ -59,7 +59,7 @@
   .hdr { display:grid; grid-template-columns:92px 14px 92px 1fr 1fr 40px; gap:6px; font-size:.72rem; color:var(--mut); text-transform:uppercase; font-weight:600; padding-bottom:4px; border-bottom:2px solid var(--line); }
   @media (max-width:640px){
     .slot { grid-template-columns:1fr 14px 1fr 40px; }
-    .slot input.name { grid-column:1/-1; grid-row:2; }
+    .slot input.name, .slot .nmw { grid-column:1/-1; grid-row:2; }
     .slot input.note { grid-column:1/-1; grid-row:3; }
     .hdr { display:none; }
   }
@@ -112,6 +112,16 @@
   .kinfo { margin:2px 0 6px; padding:4px 10px; border-radius:8px; background:#f1f6fd; color:#2b4a6f; font-size:.8rem; }
   .kinfo.end { background:#e9f9ef; color:#1f7a45; }
   .kinfo.bad { background:#fdecea; color:var(--err); font-weight:600; }
+  .kinfo.man { background:#fff8e1; color:#8d5a00; }
+  .kinfo select.kcat, td select.kcat { width:auto; padding:2px 6px; font-size:.8rem; margin:0 4px; }
+  .kinfo a.buy, a.buy { color:var(--c); font-weight:700; margin-left:4px; }
+  .cat { display:inline-block; min-width:26px; padding:0 5px; border:2px solid currentColor; border-radius:5px; font-weight:800; font-size:.78rem; line-height:1.35; text-align:center; color:#1565c0; background:#fff; letter-spacing:.3px; vertical-align:1px; margin-right:6px; }
+  .cat[data-c^="A"] { color:#2e7d32; } .cat[data-c^="C"] { color:#e65100; } .cat[data-c^="D"] { color:#6a1b9a; } .cat[data-c^="T"] { color:#5d4037; } .cat[data-c="BE"] { color:#0d47a1; }
+  .cat.bw { color:#000 !important; border-color:#000 !important; }
+  .nmw { position:relative; min-width:0; }
+  .nmw input.name { width:100%; }
+  .nmw .cat { position:absolute; left:8px; top:50%; transform:translateY(-50%); pointer-events:none; margin:0; }
+  .xtra { color:#1f7a45; font-weight:600; }
   .kbar { height:8px; border-radius:6px; background:#e3e8ef; overflow:hidden; min-width:90px; margin-top:4px; }
   .kbar i { display:block; height:100%; }
   .kbar .d { background:#2e7d32; float:left; } .kbar .p { background:#90caf9; float:left; }
@@ -351,7 +361,7 @@ function render() {
   const filled = real.filter(s => s.name.trim());
   const gaps = findGaps(slots);
   const gF = findGaps(filled), gapMin = gF.reduce((a,g) => a + g.min, 0);
-  const pkl = pkkList(), kst = kStats();
+  const pkl = kList(), kst = kStats();
   const nStart = suggestStart(filled, offs, inst), nLen = Number(db.settings.len) || 120;
   const minutes = filled.reduce((a,s) => a + Math.max(0, (toMin(s.end)??0) - (toMin(s.start)??0)), 0);
 
@@ -389,10 +399,10 @@ function render() {
         <input type="time" class="st" value="${esc(s.start)}" step="300">
         <div class="dash">–</div>
         <input type="time" class="en" value="${esc(s.end)}" step="300">
-        <input class="name" placeholder="Imię i nazwisko kursanta" value="${esc(s.name)}" autocomplete="off" list="kursanci">
+        ${(() => { const c = !s.virtual && s.name.trim() ? slotCat(kst, s) : ''; return `<div class="nmw">${catBadge(c)}<input class="name" placeholder="Imię i nazwisko kursanta" value="${esc(s.name)}" autocomplete="off" list="kursanci"${c ? ` style="padding-left:${30 + c.length * 9}px"` : ''}></div>`; })()}
         <input class="note" placeholder="Uwagi" value="${esc(s.note)}">
         ${s.virtual ? '<span></span>' : '<button class="del" title="Usuń ten termin">✕</button>'}
-      </div>${!s.virtual && s.name.trim() ? kBadge(rideInfo(kst, s)) : ''}${offHit(s, offs).length ? `<div class="offwarn ${s.name.trim() ? 'bad' : ''}">⛔ ${s.name.trim() ? 'Uwaga: jazda w czasie wolnym instruktora' : 'Wolne instruktora – nie planować'}: ${offText(offHit(s, offs))}</div>` : ''}${gaps.filter(g => g.after === i).map(g => `<div class="gap">☕ Przerwa <b>${fmtDur(g.min)}</b> <span>${g.from} – ${g.to}</span></div>`).join('')}`).join('') || (grid ? '<div class="empty">Brak terminów w tym dniu.</div>' : '')}
+      </div>${!s.virtual && s.name.trim() ? (rideInfo(kst, s) ? kBadge(rideInfo(kst, s)) : `<div class="kinfo man">✍️ <b>${esc(s.name)}</b> – nie ma w rejestrze PKK. Kategoria:${catSelect(s.name, '')}<span>(znaczek i liczenie godzin kursu)</span></div>`) : ''}${offHit(s, offs).length ? `<div class="offwarn ${s.name.trim() ? 'bad' : ''}">⛔ ${s.name.trim() ? 'Uwaga: jazda w czasie wolnym instruktora' : 'Wolne instruktora – nie planować'}: ${offText(offHit(s, offs))}</div>` : ''}${gaps.filter(g => g.after === i).map(g => `<div class="gap">☕ Przerwa <b>${fmtDur(g.min)}</b> <span>${g.from} – ${g.to}</span></div>`).join('')}`).join('') || (grid ? '<div class="empty">Brak terminów w tym dniu.</div>' : '')}
     </div>
     ${grid ? '' : `
     <div class="slot newride" id="newRide">
@@ -480,6 +490,7 @@ function render() {
     Object.keys(db.sent).forEach(k => { if (k.startsWith(inst.id+'|')) delete db.sent[k]; });
     cur.inst = db.instructors[0]?.id || null; save(); render();
   };
+  bindKcat(render);
   document.querySelectorAll('.kpick').forEach(sel => sel.onchange = () => {
     const sl = (getDay() || []).find(x => x.id === sel.dataset.sid); if (!sl || !sel.value) return;
     sl.kid = sel.value; save(); render();
@@ -1029,11 +1040,40 @@ function findClashes(slots) {
 const PKK_KEY = 'rejestr_pkk_v1';
 function pkkList() { try { const d = JSON.parse(localStorage.getItem(PKK_KEY)); return Array.isArray(d) ? d : []; } catch(e) { return []; } }
 function nName(v) { return String(v ?? '').trim().toLowerCase().replace(/\s+/g, ' '); }
-function sameName(name, list = pkkList()) { const n = nName(name); return n ? list.filter(k => nName(k.name) === n) : []; }
+const CATS = ['AM','A1','A2','A','B1','B','BE','C1','C1E','C','CE','D1','D1E','D','DE','T'];
+/* rejestr PKK + kursanci spoza rejestru z ręcznie wpisaną kategorią (rejestr ma pierwszeństwo przy tym samym nazwisku) */
+function kList() {
+  const l = pkkList(), have = new Set(l.map(k => nName(k.name))), m = db.kCat || {};
+  return l.concat(Object.keys(m).filter(n => !have.has(n) && m[n] && m[n].cat).map(n => ({ id:'m:' + n, name:m[n].name, cat:m[n].cat, kurs:'', manual:true })));
+}
+function setManualCat(name, cat) {
+  const n = nName(name); if (!n) return; db.kCat = db.kCat || {};
+  if (cat) db.kCat[n] = { name:String(name).trim(), cat }; else delete db.kCat[n];
+}
+const catSelect = (name, val) => `<select class="kcat" data-n="${esc(name)}"><option value="">${val ? '– usuń –' : 'wybierz…'}</option>${CATS.map(c => `<option ${c === val ? 'selected' : ''}>${c}</option>`).join('')}</select>`;
+function catBadge(c, bw) { return c ? `<span class="cat${bw ? ' bw' : ''}" data-c="${esc(c)}">${esc(c)}</span>` : ''; }
+function slotCat(st, s) { const inf = rideInfo(st, s); return inf && inf.k ? catMain(inf.k).replace(/\+/g, '') : ''; }
+function kExtraList(id) { return (db.kExtra && db.kExtra[id]) || []; }
+function kExtraH(id) { return kExtraList(id).reduce((a, e) => a + Number(e.h || 0), 0); }
+async function buyHours(k) {
+  const base = reqBase(k), ex = kExtraH(k.id);
+  const r = await modal({ title:'➕ Dokupione godziny – ' + esc(k.name),
+    text:`Teraz: ${base ? base + ' h kursu' : 'brak ustalonej liczby godzin'}${ex ? ' + ' + fmtH(ex * 60) + ' h dokupione' : ''}.`,
+    fields:[{ label:'Ile godzin dokupił', type:'number', value:'' }, { label:'Data dokupienia', type:'date', value:todayStr() }, { label:'Uwaga (opcjonalnie, np. zapłacone gotówką)', type:'text', value:'' }],
+    ok:'Dodaj', check: v => Number(v[0]) > 0 ? (v[1] ? '' : 'Podaj datę.') : 'Wpisz liczbę godzin większą od zera.' });
+  if (!r) return false;
+  db.kExtra = db.kExtra || {}; (db.kExtra[k.id] = db.kExtra[k.id] || []).push({ id:uid(), h:Number(r[0]), date:r[1], note:r[2].trim() });
+  save(); render(); toast(`➕ Dodano ${fmtH(Number(r[0]) * 60)} h dla <b>${esc(k.name)}</b>.`); return true;
+}
+function bindKcat(after) {
+  document.querySelectorAll('select.kcat').forEach(sel => { sel.onclick = e => e.stopPropagation(); sel.onchange = () => { setManualCat(sel.dataset.n, sel.value); save(); after(); }; });
+  document.querySelectorAll('[data-buy]').forEach(b => b.onclick = e => { e.preventDefault(); e.stopPropagation(); const k = kList().find(x => x.id === b.dataset.buy); if (k) buyHours(k); });
+}
+function sameName(name, list = kList()) { const n = nName(name); return n ? list.filter(k => nName(k.name) === n) : []; }
 /* jednoznaczny kursant o tym nazwisku (null, gdy brak albo kilka osób o tym samym imieniu i nazwisku) */
-function findK(name, list = pkkList()) { const c = sameName(name, list); return c.length === 1 ? c[0] : null; }
+function findK(name, list = kList()) { const c = sameName(name, list); return c.length === 1 ? c[0] : null; }
 /* wyróżnik osoby przy powtarzającym się nazwisku: telefon, końcówka PKK, kategoria albo data zapisu */
-function kTag(k, list = pkkList()) {
+function kTag(k, list = kList()) {
   const c = sameName(k.name, list); if (c.length < 2) return '';
   const uniq = f => { const v = f(k); return v && c.filter(o => f(o) === v).length === 1 ? v : ''; };
   return uniq(o => o.phone ? 'tel. ' + o.phone.trim() : '') || uniq(o => o.pkk ? 'PKK …' + String(o.pkk).replace(/\D/g, '').slice(-4) : '')
@@ -1041,7 +1081,7 @@ function kTag(k, list = pkkList()) {
 }
 const kLabel = (k, list) => kTag(k, list) ? `${k.name} · ${kTag(k, list)}` : k.name;
 /* rozpoznanie wpisu: „Anna Nowak · tel. 600 111 222” z podpowiedzi albo samo nazwisko */
-function resolveName(val, keepKid, list = pkkList()) {
+function resolveName(val, keepKid, list = kList()) {
   const v = String(val ?? '').trim();
   const dec = list.find(k => kTag(k, list) && nName(kLabel(k, list)) === nName(v));
   if (dec) return { name:dec.name.trim(), k:dec };
@@ -1050,18 +1090,23 @@ function resolveName(val, keepKid, list = pkkList()) {
   if (c.length > 1) { const kept = c.find(k => k.id === keepKid); return { name:v, k:kept || null, amb:kept ? null : c }; }
   return { name:v, k:null };
 }
+/* minimalna liczba godzin zajęć praktycznych wg rozporządzenia w sprawie szkolenia (§ 9 ust. 1 pkt 2); można zmienić w ⚙️ Godziny wg kategorii */
+const REQ_DEF = { AM:5, A1:20, A2:20, A:20, B1:30, B:30, BE:15, C1:20, C1E:20, C:30, CE:25, D1:30, D1E:20, D:60, DE:25, T:20 };
+function reqTable() { const t = { ...REQ_DEF }; Object.entries(db.settings.reqCat || {}).forEach(([c, h]) => t[c.toUpperCase().replace(/\+/g, '')] = Number(h)); return t; }
 function catMain(k) { return String(k.cat || '').toUpperCase().split(/[\s,;/]+/).filter(Boolean)[0] || ''; }
 /* wymagane godziny: indywidualnie (np. kurs uzupełniający) albo wg kategorii */
-function reqHours(k) {
+function reqHours(k) { const b = reqBase(k), e = kExtraH(k.id); return b == null ? (e || null) : b + e; }
+/* godziny kursu bez dokupionych */
+function reqBase(k) {
   const own = db.kHours && db.kHours[k.id];
   if (own) return Number(own);
   if (/uzup/i.test(k.kurs || '')) return null; // uzupełniający – liczba godzin wpisywana ręcznie
-  const c = catMain(k), t = Object.assign({ B:30 }, db.settings.reqCat || {});
+  const c = catMain(k).replace(/\+/g, ''), t = reqTable();
   return t[c] ? Number(t[c]) : null;
 }
 /* wszystkie jazdy kursantów: { kid: { k, rides:[{date, inst, s, min, done, cumFrom, cumTo}], done, plan } } + jazdy spoza rejestru */
 function kStats() {
-  const list = pkkList(), byId = {}, other = {}, amb = [];
+  const list = kList(), byId = {}, other = {}, amb = [];
   list.forEach(k => byId[k.id] = { k, rides:[], done:0, plan:0 });
   const now = new Date(), today = todayStr(), nowMin = now.getHours() * 60 + now.getMinutes();
   Object.keys(db.days).forEach(key => {
@@ -1101,10 +1146,11 @@ function kBadge(info) {
     <select class="kpick" data-sid="${info.s.id}" style="width:auto;padding:3px 6px;font-size:.8rem;margin-left:4px"><option value="">wybierz…</option>${info.amb.map(k => `<option value="${k.id}">${esc(kLabel(k))}</option>`).join('')}</select>
     <span style="font-weight:400">(do czasu wyboru jazda nie liczy się żadnej z nich)</span></div>`;
   const { k, r, req, total, over } = info;
-  let txt = `🎓 ${esc(k.name)}${kTag(k) ? ' (' + esc(kTag(k)) + ')' : ''}${catMain(k) ? ' · kat. ' + esc(catMain(k)) : ''} · ta jazda: <b>${fmtH(r.cumFrom)}–${fmtH(r.cumTo)} h</b>${req ? ' z ' + req : ''}`;
+  let txt = `🎓 ${esc(k.name)}${kTag(k) ? ' (' + esc(kTag(k)) + ')' : ''}${k.manual ? ' · ✍️ spoza rejestru, kat.' + catSelect(k.name, k.cat) : (catMain(k) ? ' · kat. ' + esc(catMain(k)) : '')} · ta jazda: <b>${fmtH(r.cumFrom)}–${fmtH(r.cumTo)} h</b>${req ? ' z ' + req : ''}`;
   txt += ` · łącznie w grafiku ${fmtH(total)} h${req ? ' / ' + req + ' h' : ''}`;
   let cls = '';
-  if (req && over > 0) { cls = 'bad'; txt += ` · ⚠️ ponad kurs o ${fmtH(over)} h`; }
+  if (kExtraH(k.id)) txt += ` <span class="xtra">(w tym ${fmtH(kExtraH(k.id) * 60)} h dokupione)</span>`;
+  if (req && over > 0) { cls = 'bad'; txt += ` · ⚠️ ponad kurs o ${fmtH(over)} h <a href="#" class="buy" data-buy="${k.id}">➕ dokupił godziny?</a>`; }
   else if (req && req * 60 - total <= 120) { cls = 'end'; txt += req * 60 - total === 0 ? ' · ✅ komplet godzin' : ` · zostało ${fmtH(req * 60 - total)} h`; }
   else if (!req) txt += /uzup/i.test(k.kurs || '') ? ' · <i>kurs uzupełniający – ustaw liczbę godzin w zakładce Kursanci</i>' : '';
   return `<div class="kinfo ${cls}">${txt}</div>`;
@@ -1142,7 +1188,8 @@ function buildText(inst, date) {
   const L = [`*AUTO-MAX – grafik pracy*`, `_${inst.name}, ${dow(date)} ${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}_`, ''];
   if (!rides.length) L.push('Brak zaplanowanych jazd.');
   rides.forEach((r, i) => {
-    L.push(`*${r.start}-${r.end}* ${r.name}${dupNote(r, kst)}${r.note ? ` _(${r.note})_` : ''}`);
+    const c = slotCat(kst, r);
+    L.push(`*${r.start}-${r.end}* ${c ? '[' + c + '] ' : ''}${r.name}${dupNote(r, kst)}${r.note ? ` _(${r.note})_` : ''}`);
     gaps.filter(g => g.after === i).forEach(g => L.push(`_– przerwa ${fmtDur(g.min)} –_`));
   });
   if (offs.length) L.push('', `⛔ *Wolne:* ${offs.map(o => `${o.from}-${o.to}${o.note ? ' (' + o.note + ')' : ''}`).join(', ')}`);
@@ -1175,7 +1222,9 @@ function drawCard(inst, date) {
       const r = it.r;
       x.font = `bold 19px ${F}`; x.fillText(`${r.start} – ${r.end}`, c1 + 10, y + rowH/2);
       if (clash.has(r.id)) { x.fillRect(c1 + 10, y + rowH/2 + 13, x.measureText(`${r.start} – ${r.end}`).width, 2); }
-      x.font = `20px ${F}`; x.fillText(clip(r.name + dupNote(r, kst), c3 - c2 - 20), c2 + 10, y + rowH/2);
+      const cat = slotCat(kst, r); let nx = c2 + 10;
+      if (cat) { x.font = `800 15px ${F}`; const bw = Math.max(30, x.measureText(cat).width + 14); x.lineWidth = 2; x.strokeRect(nx, y + rowH/2 - 12, bw, 24); x.textAlign = 'center'; x.fillText(cat, nx + bw/2, y + rowH/2 + 1); x.textAlign = 'left'; x.lineWidth = 1; nx += bw + 10; }
+      x.font = `20px ${F}`; x.fillText(clip(r.name + dupNote(r, kst), c3 - nx - 10), nx, y + rowH/2);
       x.font = `17px ${F}`; x.fillText(clip(r.note || '', W - P - c3 - 20), c3 + 10, y + rowH/2);
       x.strokeRect(P, y, W - 2*P, rowH); x.beginPath(); x.moveTo(c2, y); x.lineTo(c2, y + rowH); x.moveTo(c3, y); x.lineTo(c3, y + rowH); x.stroke();
     } else {
@@ -1243,7 +1292,7 @@ function buildGroupText(date, list) {
     const { rides, gaps, offs, min } = dayData(inst, date);
     L.push('', `👤 *${inst.name}* – ${rides.length} ${rideWord(rides.length)}, ${fmtH(min)} h`);
     if (!rides.length) L.push('_brak jazd_');
-    rides.forEach((r, i) => { L.push(`*${r.start}-${r.end}* ${r.name}${dupNote(r, kst)}${r.note ? ` _(${r.note})_` : ''}`); gaps.filter(g => g.after === i).forEach(g => L.push(`_– przerwa ${fmtDur(g.min)} –_`)); });
+    rides.forEach((r, i) => { const c = slotCat(kst, r); L.push(`*${r.start}-${r.end}* ${c ? '[' + c + '] ' : ''}${r.name}${dupNote(r, kst)}${r.note ? ` _(${r.note})_` : ''}`); gaps.filter(g => g.after === i).forEach(g => L.push(`_– przerwa ${fmtDur(g.min)} –_`)); });
     if (offs.length) L.push(`⛔ Wolne: ${offs.map(o => `${o.from}-${o.to}`).join(', ')}`);
   });
   return L.join('\n');
@@ -1270,10 +1319,10 @@ function renderKurs() {
   $('main').innerHTML = `
   <div class="card">
     <div class="row" style="justify-content:space-between">
-      <h2 style="margin:0;font-size:1.1rem">👥 Kursanci z rejestru PKK <small style="color:var(--mut);font-weight:400">(${st.list.length})</small></h2>
+      <h2 style="margin:0;font-size:1.1rem">👥 Kursanci <small style="color:var(--mut);font-weight:400">(${st.list.length}${st.list.some(k => k.manual) ? ', w tym ' + st.list.filter(k => k.manual).length + ' spoza rejestru' : ''})</small></h2>
       <button class="btn sec small" id="kCat">⚙️ Godziny wg kategorii</button>
     </div>
-    ${st.list.length ? '' : `<p class="lock" style="margin-top:8px">Nie znaleziono rejestru PKK w tej przeglądarce. Otwórz rejestr na tym komputerze (<b>automax-osk.github.io/rejestr_pkk</b>) w tym samym Chrome albo pobierz dane z chmury.</p>`}
+    ${pkkList().length ? '' : `<p class="lock" style="margin-top:8px">Nie znaleziono rejestru PKK w tej przeglądarce. Otwórz rejestr na tym komputerze (<b>automax-osk.github.io/rejestr_pkk</b>) w tym samym Chrome albo pobierz dane z chmury.</p>`}
     <div class="row" style="margin-top:10px">
       <input id="kq" placeholder="🔍 Szukaj: nazwisko, telefon, kategoria" value="${esc(cur.kq || '')}" style="flex:1;min-width:200px">
       <label class="lock"><input type="checkbox" id="kNo" ${f.noNext ? 'checked' : ''} style="width:auto;margin-right:4px">bez zaplanowanej jazdy</label>
@@ -1287,15 +1336,15 @@ function renderKurs() {
       <thead><tr><th>Kursant</th><th>Godziny</th><th>Najbliższa jazda</th><th></th></tr></thead>
       <tbody>${rows.map(r => `
         <tr class="krow" data-k="${r.k.id}">
-          <td><b>${esc(r.k.name)}</b>${kTag(r.k, st.list) ? ` <span class="dupe">⚠️ ${sameName(r.k.name, st.list).length} osoby o tym nazwisku</span>` : ''}<br><small style="color:var(--mut)">${r.k.cat ? 'kat. ' + esc(r.k.cat) : ''}${r.k.kurs ? ' · ' + esc(r.k.kurs) : ''}${r.k.phone ? ' · 📞 ' + esc(r.k.phone) : ''}</small></td>
-          <td style="min-width:150px"><b>${fmtH(r.x.done)}</b>${r.req ? ' / ' + r.req : ''} h wyjeżdżone${r.x.plan ? `<br><small>+ ${fmtH(r.x.plan)} h zaplanowane</small>` : ''}
+          <td><b>${esc(r.k.name)}</b>${kTag(r.k, st.list) ? ` <span class="dupe">⚠️ ${sameName(r.k.name, st.list).length} osoby o tym nazwisku</span>` : ''}<br><small style="color:var(--mut)">${r.k.manual ? '✍️ spoza rejestru · kat.' + catSelect(r.k.name, r.k.cat) : (r.k.cat ? catBadge(catMain(r.k)) + 'kat. ' + esc(r.k.cat) : '')}${r.k.kurs ? ' · ' + esc(r.k.kurs) : ''}${r.k.phone ? ' · 📞 ' + esc(r.k.phone) : ''}</small></td>
+          <td style="min-width:150px"><b>${fmtH(r.x.done)}</b>${r.req ? ' / ' + r.req : ''} h wyjeżdżone${kExtraH(r.k.id) ? `<br><small class="xtra">${reqBase(r.k) ? reqBase(r.k) + ' h kurs + ' : ''}${fmtH(kExtraH(r.k.id) * 60)} h dokupione</small>` : ''}${r.x.plan ? `<br><small>+ ${fmtH(r.x.plan)} h zaplanowane</small>` : ''}
             ${r.req ? (r.left < 0 ? `<br><small style="color:var(--err);font-weight:600">⚠️ ponad kurs o ${fmtH(-r.left)} h</small>` : `<br><small>zostało do zaplanowania: <b>${fmtH(r.left)} h</b></small>`) : `<br><small style="color:#b45309">${/uzup/i.test(r.k.kurs || '') ? 'uzupełniający – ustaw godziny ✏️' : 'brak limitu godzin'}</small>`}
             ${bar(r.x, r.req)}</td>
           <td style="font-size:.88rem">${r.next ? `${fmtD(r.next.date)} ${r.next.s.start}<br><small>${esc(r.next.inst.name)}</small>` : `<span style="color:#b45309;font-weight:600">brak</span>${r.k.phone ? `<br><small><a href="tel:${esc(r.k.phone.replace(/\s/g, ''))}">zadzwoń</a></small>` : ''}`}
             ${r.last ? `<br><small style="color:var(--mut)">ostatnia: ${fmtD(r.last.date)}</small>` : ''}</td>
-          <td style="white-space:nowrap"><button class="btn sec small" data-h="${r.k.id}" title="Liczba godzin kursu">✏️</button></td>
+          <td style="white-space:nowrap"><button class="btn sec small" data-h="${r.k.id}" title="Liczba godzin kursu">✏️</button> <button class="btn sec small" data-buy="${r.k.id}" title="Dokupione godziny">➕ h</button></td>
         </tr>
-        <tr class="det" data-for="${r.k.id}" hidden><td colspan="4">${r.x.rides.length ? r.x.rides.map(z => `<div style="padding:2px 0">${z.done ? '✅' : '🗓️'} <a href="#" data-go="${z.inst.id}|${z.date}">${fmtLong(z.date)}</a>, ${z.s.start}–${z.s.end} · ${esc(z.inst.name)} · godz. ${fmtH(z.cumFrom)}–${fmtH(z.cumTo)}</div>`).join('') : '<i>Brak jazd w grafiku.</i>'}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">Brak kursantów do pokazania.</td></tr>'}</tbody>
+        <tr class="det" data-for="${r.k.id}" hidden><td colspan="4">${kExtraList(r.k.id).length ? `<div style="padding:2px 0 6px"><b>➕ Dokupione godziny:</b> ${kExtraList(r.k.id).map(e => `<span class="xtra" style="white-space:nowrap;margin-right:10px">${fmtH(e.h * 60)} h · ${fmtD(e.date)}${e.note ? ' (' + esc(e.note) + ')' : ''} <a href="#" data-xbuy="${r.k.id}|${e.id}" title="Usuń ten wpis" style="color:var(--err)">✕</a></span>`).join('')}</div>` : ''}${r.x.rides.length ? r.x.rides.map(z => `<div style="padding:2px 0">${z.done ? '✅' : '🗓️'} <a href="#" data-go="${z.inst.id}|${z.date}">${fmtLong(z.date)}</a>, ${z.s.start}–${z.s.end} · ${esc(z.inst.name)} · godz. ${fmtH(z.cumFrom)}–${fmtH(z.cumTo)}</div>`).join('') : '<i>Brak jazd w grafiku.</i>'}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">Brak kursantów do pokazania.</td></tr>'}</tbody>
     </table>
   </div>
   ${st.amb.length ? `<div class="card" style="border:1px solid #f5c2bd">
@@ -1305,9 +1354,16 @@ function renderKurs() {
   </div>` : ''}
   ${others.length ? `<div class="card">
     <h2 style="margin:0 0 6px;font-size:1rem">Jazdy kursantów spoza rejestru PKK <small style="color:var(--mut);font-weight:400">(nazwisko w grafiku inne niż w rejestrze)</small></h2>
-    ${others.map(o => `<div class="offitem"><b>${esc(o.name)}</b> <span>${o.rides.length} ${rideWord(o.rides.length)} · ${fmtH(o.done + o.plan)} h</span></div>`).join('')}
-    <p class="lock" style="margin:8px 0 0">Wpisz w grafiku dokładnie takie imię i nazwisko jak w rejestrze (podpowiada się przy wpisywaniu), żeby godziny liczyły się kursantowi.</p>
+    ${others.map(o => `<div class="offitem"><b>${esc(o.name)}</b> <span>${o.rides.length} ${rideWord(o.rides.length)} · ${fmtH(o.done + o.plan)} h</span><span style="margin-left:auto;font-size:.85rem">kategoria:${catSelect(o.name, '')}</span></div>`).join('')}
+    <p class="lock" style="margin:8px 0 0">Jeśli kursant jest w rejestrze – wpisz w grafiku dokładnie takie imię i nazwisko (podpowiada się przy wpisywaniu). Jeśli go nie ma – wybierz kategorię, a godziny kursu zaczną mu się liczyć.</p>
   </div>` : ''}`;
+  bindKcat(renderKurs);
+  document.querySelectorAll('a[data-xbuy]').forEach(a => a.onclick = async e => {
+    e.preventDefault(); e.stopPropagation(); const [kid, id] = a.dataset.xbuy.split('|'), e2 = kExtraList(kid).find(x => x.id === id); if (!e2) return;
+    if (!confirm(`Usunąć wpis: ${fmtH(e2.h * 60)} h dokupione ${fmtD(e2.date)}?`)) return;
+    if (!(await requirePassword('Usunięcie dokupionych godzin.'))) return;
+    db.kExtra[kid] = kExtraList(kid).filter(x => x.id !== id); if (!db.kExtra[kid].length) delete db.kExtra[kid]; save(); renderKurs();
+  });
   $('kq').oninput = e => { cur.kq = e.target.value; const pos = e.target.selectionStart; renderKurs(); const i = $('kq'); i.focus(); i.setSelectionRange(pos, pos); };
   $('kNo').onchange = e => { cur.kf = { ...f, noNext:e.target.checked }; renderKurs(); };
   $('kHide').onchange = e => { cur.kf = { ...f, hideDone:e.target.checked }; renderKurs(); };
@@ -1317,7 +1373,7 @@ function renderKurs() {
   document.querySelectorAll('tr.det a[data-go]').forEach(a => a.onclick = e => { e.preventDefault(); const [id, d] = a.dataset.go.split('|'); cur.inst = id; cur.date = d; cur.view = 'day'; render(); window.scrollTo(0, 0); });
   document.querySelectorAll('[data-h]').forEach(b => b.onclick = async () => {
     const k = st.list.find(x => x.id === b.dataset.h);
-    const r = await modal({ title:'✏️ Godziny kursu – ' + esc(k.name), text:`Ile godzin jazd ma kursant (np. wykupione godziny na kursie uzupełniającym). Puste = wg kategorii${reqHours({ ...k, id:'' }) ? ' (' + reqHours({ ...k, id:'' }) + ' h)' : ''}.`,
+    const r = await modal({ title:'✏️ Godziny kursu – ' + esc(k.name), text:`Ile godzin jazd obejmuje kurs (np. kurs uzupełniający) – <b>bez dokupionych</b>, te dodajesz przyciskiem ➕ h. Puste = wg kategorii${reqBase({ ...k, id:'' }) ? ' (' + reqBase({ ...k, id:'' }) + ' h)' : ''}.`,
       fields:[{ label:'Liczba godzin', type:'number', value:(db.kHours && db.kHours[k.id]) || '' }], ok:'Zapisz',
       check: v => v[0] === '' || Number(v[0]) > 0 ? '' : 'Podaj liczbę większą od zera albo zostaw puste.' });
     if (!r) return; db.kHours = db.kHours || {};
@@ -1325,12 +1381,12 @@ function renderKurs() {
     save(); renderKurs();
   });
   $('kCat').onclick = async () => {
-    const t = Object.assign({ B:30 }, db.settings.reqCat || {});
-    const r = await modal({ title:'⚙️ Godziny jazd wg kategorii', text:'Wpisz kategorię i liczbę godzin, oddzielone przecinkami, np. <b>B=30, A=20, C=30</b>. Dotyczy kursów podstawowych; kurs uzupełniający ustawiasz przy kursancie.',
+    const t = reqTable();
+    const r = await modal({ title:'⚙️ Godziny jazd wg kategorii', text:'Domyślnie: minimalne godziny zajęć praktycznych z rozporządzenia. Zmień liczbę, jeśli w szkole kurs ma więcej godzin (np. <b>B=32</b>). <b>0</b> = bez limitu. Dotyczy kursów podstawowych; kurs uzupełniający ustawiasz przy kursancie (✏️).',
       fields:[{ label:'Kategorie i godziny', type:'text', value:Object.entries(t).map(([c, h]) => `${c}=${h}`).join(', ') }], ok:'Zapisz',
       check: v => v[0].split(',').every(p => !p.trim() || /^\s*[A-Z0-9+]+\s*=\s*\d+\s*$/i.test(p)) ? '' : 'Użyj formatu: B=30, A=20' });
     if (!r) return;
-    const o = {}; r[0].split(',').forEach(p => { const m = p.match(/^\s*([A-Z0-9+]+)\s*=\s*(\d+)\s*$/i); if (m) o[m[1].toUpperCase()] = Number(m[2]); });
+    const o = {}; r[0].split(',').forEach(p => { const m = p.match(/^\s*([A-Z0-9+]+)\s*=\s*(\d+)\s*$/i); if (m) o[m[1].toUpperCase().replace(/\+/g, '')] = Number(m[2]); });
     db.settings.reqCat = o; save(); renderKurs();
   };
 }
@@ -1442,7 +1498,7 @@ function printPages(pages) {
       <p class="dt">Dzień: ${dow(p.date)}, ${fmtLong(p.date)}</p>
       <table>
         <thead><tr><th>Godzina</th><th>Kursant</th><th>Uwagi</th></tr></thead>
-        <tbody>${filled.map((s, i) => `<tr><td class="t">${s.name.trim() ? ovTime(s, filled) : ''}</td><td class="n">${esc(s.name)}${esc(dupNote(s, pst))}${(() => { const inf = rideInfo(pst, s); return inf && !inf.amb ? ` <small style="font-size:8.5pt">(${fmtH(inf.r.cumFrom)}–${fmtH(inf.r.cumTo)} h${inf.req ? ' z ' + inf.req : ''})</small>` : ''; })()}${offHit(s, offFor(p.inst.id, p.date)).length ? ' <i style="font-size:8.5pt">(w czasie wolnego!)</i>' : ''}</td><td>${esc(s.note)}</td></tr>`
+        <tbody>${filled.map((s, i) => `<tr><td class="t">${s.name.trim() ? ovTime(s, filled) : ''}</td><td class="n">${catBadge(slotCat(pst, s), true)}${esc(s.name)}${esc(dupNote(s, pst))}${(() => { const inf = rideInfo(pst, s); return inf && !inf.amb ? ` <small style="font-size:8.5pt">(${fmtH(inf.r.cumFrom)}–${fmtH(inf.r.cumTo)} h${inf.req ? ' z ' + inf.req : ''})</small>` : ''; })()}${offHit(s, offFor(p.inst.id, p.date)).length ? ' <i style="font-size:8.5pt">(w czasie wolnego!)</i>' : ''}</td><td>${esc(s.note)}</td></tr>`
           + gaps.filter(g => g.after === i).map(g => `<tr class="pgap"><td colspan="3">Przerwa ${fmtDur(g.min)} (${g.from} – ${g.to})</td></tr>`).join('')).join('')}
           ${'<tr class="blank"><td class="t"></td><td></td><td></td></tr>'.repeat(5)}</tbody>
       </table>
@@ -1611,11 +1667,11 @@ async function readCopy(id) { return JSON.parse(await (await gfetch(`${DRV}/${id
 /* ---------- grafik w telefonie instruktora: osobny plik na Dysku dla każdego instruktora ---------- */
 /* w pliku są TYLKO jazdy i wolne danego instruktora (7 dni wstecz, 90 dni naprzód); link „każdy z linkiem może czytać” */
 function instPayload(inst) {
-  const from = addDays(todayStr(), -7), to = addDays(todayStr(), 90), list = pkkList(), days = {}, off = {};
+  const from = addDays(todayStr(), -7), to = addDays(todayStr(), 90), list = kList(), st = kStats(), days = {}, off = {};
   Object.keys(db.days).forEach(k => {
     const [id, d] = k.split('|'); if (id !== inst.id || d < from || d > to) return;
     const r = db.days[k].filter(s => s.name.trim()).sort((a, b) => toMin(a.start) - toMin(b.start))
-      .map(s => { const kk = findK(s.name, list); return { start:s.start, end:s.end, name:s.name.trim(), note:(s.note || '').trim(), tel:(kk && kk.phone) || '' }; });
+      .map(s => { const kk = findK(s.name, list); return { start:s.start, end:s.end, name:s.name.trim(), note:(s.note || '').trim(), tel:(kk && kk.phone) || '', cat:slotCat(st, s) }; });
     if (r.length) days[d] = r;
   });
   Object.keys(db.off).forEach(k => {
