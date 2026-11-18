@@ -40,6 +40,13 @@
   .who { flex:1; min-width:0; }
   .who b { font-size:1.02rem; }
   .who .note { color:var(--mut); font-size:.88rem; margin-top:2px; }
+  .sms { display:inline-block; margin:5px 0 0 6px; text-decoration:none; background:#e3f2fd; color:var(--c); border-radius:8px; padding:5px 10px; font-size:.9rem; font-weight:600; }
+  .sms.done { background:#eceff1; color:var(--mut); }
+  .smsbar { background:#e3f2fd; border-radius:10px; padding:9px 10px; margin-bottom:8px; font-size:.9rem; }
+  .smsbar .nx { display:block; margin-top:7px; text-align:center; text-decoration:none; background:var(--c); color:#fff; border-radius:10px; padding:11px; font-weight:700; font-size:1rem; }
+  .smsbar details { margin-top:6px; } .smsbar summary { cursor:pointer; color:var(--c); font-size:.85rem; }
+  .smsbar textarea { width:100%; box-sizing:border-box; margin-top:5px; font:inherit; font-size:.88rem; padding:7px; border:1px solid #b6cbe3; border-radius:8px; min-height:74px; }
+  .smsbar .hint { color:var(--mut); font-size:.78rem; margin-top:3px; }
   .tel { display:inline-block; margin-top:5px; text-decoration:none; background:#e8f5e9; color:var(--ok); border-radius:8px; padding:5px 10px; font-size:.9rem; font-weight:600; }
   .ride.now { background:#e3f2fd; border-radius:8px; }
   .ride.past { opacity:.5; }
@@ -89,7 +96,7 @@
   <div class="upd" id="upd"></div>
 </header>
 <main id="main"><div class="msg">Wczytywanie…</div></main>
-<details class="ver"><summary>Mój grafik · <b>wersja 1.3</b> · co nowego?</summary><div class="chg"><h4>1.3 – 17.11.2026</h4><ul><li>Numer wersji na dole.</li></ul><h4>1.2 – 16.11.2026</h4><ul><li>Znaczek kategorii przy kursancie.</li></ul><h4>1.1 – 15.11.2026</h4><ul><li>Wyszukiwarka kursanta.</li><li>Ikona i nazwa „Mój grafik” na ekranie telefonu.</li></ul><h4>1.0 – 15.11.2026</h4><ul><li>Pierwsza wersja: dziś, jutro, tydzień, telefony kursantów.</li></ul></div></details>
+<details class="ver"><summary>Mój grafik · <b>wersja 1.4</b> · co nowego?</summary><div class="chg"><h4>1.4 – 18.11.2026</h4><ul><li>📩 Przypomnienia SMS dla kursantów – pojedynczo albo po kolei dla całego dnia, z własną treścią.</li><li>Telefon kursanta spoza rejestru (wpisany w grafiku albo w uwagach) – można zadzwonić jednym stuknięciem.</li></ul><h4>1.3 – 17.11.2026</h4><ul><li>Numer wersji na dole.</li></ul><h4>1.2 – 16.11.2026</h4><ul><li>Znaczek kategorii przy kursancie.</li></ul><h4>1.1 – 15.11.2026</h4><ul><li>Wyszukiwarka kursanta.</li><li>Ikona i nazwa „Mój grafik” na ekranie telefonu.</li></ul><h4>1.0 – 15.11.2026</h4><ul><li>Pierwsza wersja: dziś, jutro, tydzień, telefony kursantów.</li></ul></div></details>
 
 <script>
 const $ = id => document.getElementById(id);
@@ -136,7 +143,39 @@ async function load() {
   render();
 }
 
-function ridesOf(date) { return (data && data.days && data.days[date]) || []; }
+/* telefon: z rejestru PKK / z grafiku, a jak brak – numer wpisany w uwagach */
+const telFromNote = n => { const m = String(n || '').match(/(?<!\d)(?:\+?48[\s-]?)?(\d{3})[\s-]?(\d{3})[\s-]?(\d{3})(?!\d)/); return m ? m[1] + ' ' + m[2] + ' ' + m[3] : ''; };
+function ridesOf(date) { return ((data && data.days && data.days[date]) || []).map(r => r.tel ? r : { ...r, tel:telFromNote(r.note) }); }
+
+/* ---------- przypomnienia SMS (otwiera aplikację SMS z gotową treścią – instruktor tylko stuka „Wyślij”) ---------- */
+const TKEY = 'automax_sms_tpl', SKEY2 = 'automax_sms_sent';
+const TPL_DEF = 'Dzień dobry, przypominam o jeździe {kiedy} ({data}) o godz. {godz}. Instruktor {instruktor}, OSK Auto-MAX.';
+const getTpl = () => { try { return localStorage.getItem(TKEY) || TPL_DEF; } catch(e) { return TPL_DEF; } };
+const getSent = () => { try { return JSON.parse(localStorage.getItem(SKEY2)) || {}; } catch(e) { return {}; } };
+const sentKey = (date, r) => date + '|' + r.start + '|' + norm(r.name);
+function markSent(k) { const s = getSent(), lim = addDays(todayStr(), -14); Object.keys(s).forEach(x => { if (x.slice(0, 10) < lim) delete s[x]; }); s[k] = 1; try { localStorage.setItem(SKEY2, JSON.stringify(s)); } catch(e) {} }
+function smsText(date, r) {
+  const t = todayStr(), kiedy = date === t ? 'dziś' : date === addDays(t, 1) ? 'jutro' : 'w ' + (['niedzielę','poniedziałek','wtorek','środę','czwartek','piątek','sobotę'][parseD(date).getDay()]);
+  const d = parseD(date), first = String((data && data.name) || '').trim().split(/\s+/)[0] || '';
+  return getTpl().replace(/\{kiedy\}/g, kiedy).replace(/\{data\}/g, String(d.getDate()).padStart(2, '0') + '.' + String(d.getMonth() + 1).padStart(2, '0'))
+    .replace(/\{godz\}/g, r.start).replace(/\{instruktor\}/g, first).replace(/\{kursant\}/g, String(r.name).trim().split(/\s+/)[0] || '');
+}
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+const smsHref = (date, r) => `sms:${telHref(r.tel)}${isIOS ? '&' : '?'}body=${encodeURIComponent(smsText(date, r))}`;
+function smsBar(date) {
+  if (date < todayStr()) return '';
+  const list = ridesOf(date).filter(r => r.tel); if (!list.length) return '';
+  const sent = getSent(), done = list.filter(r => sent[sentKey(date, r)]).length, next = list.find(r => !sent[sentKey(date, r)]);
+  return `<div class="smsbar">📩 <b>Przypomnienia SMS</b> – wysłano ${done} z ${list.length}
+    ${next ? `<a class="nx" href="${esc(smsHref(date, next))}" data-sk="${esc(sentKey(date, next))}">📩 ${done ? 'Następny' : 'Wyślij po kolei'}: ${esc(next.name)} (${esc(next.start)})</a>` : '<div style="margin-top:5px;color:var(--ok);font-weight:600">✅ Wszyscy kursanci z tego dnia dostali przypomnienie.</div>'}
+    <details><summary>✏️ Treść SMS</summary><textarea id="tpl">${esc(getTpl())}</textarea>
+    <div class="hint">Wstawiane same: {kiedy} = dziś / jutro / w środę, {data} = 19.11, {godz} = 08:00, {instruktor} = Twoje imię, {kursant} = imię kursanta.</div>
+    <div class="hint">Przykład: ${esc(smsText(date, list[0]))}</div></details></div>`;
+}
+function bindSms() {
+  document.querySelectorAll('[data-sk]').forEach(a => a.addEventListener('click', () => { markSent(a.dataset.sk); setTimeout(render, 800); }));
+  const t = $('tpl'); if (t) t.oninput = () => { try { localStorage.setItem(TKEY, t.value.trim() || TPL_DEF); } catch(e) {} };
+}
 function offOf(date) { return (data && data.off && data.off[date]) || []; }
 function offLine(o) { return `${esc(o.from)}–${esc(o.to)}${o.note ? ' (' + esc(o.note) + ')' : ''}`; }
 
@@ -144,6 +183,8 @@ function dayHtml(date) {
   const rides = ridesOf(date), offs = offOf(date), now = new Date(), nowM = now.getHours()*60 + now.getMinutes(), isToday = date === todayStr();
   let h = offs.length ? `<div class="offb">⛔ <b>Wolne:</b> ${offs.map(offLine).join(', ')}</div>` : '';
   if (!rides.length) return h + `<div class="empty">Brak zaplanowanych jazd.</div>`;
+  h += smsBar(date);
+  const sent = getSent(), future = date >= todayStr();
   let min = 0;
   rides.forEach((r, i) => {
     const a = toMin(r.start), b = toMin(r.end); min += Math.max(0, b - a);
@@ -151,7 +192,7 @@ function dayHtml(date) {
     const cls = isToday ? (nowM >= a && nowM < b ? 'now' : nowM >= b ? 'past' : '') : '';
     h += `<div class="ride ${cls}"><div class="tm">${esc(r.start)}–${esc(r.end)}<small>${fmtDur(Math.max(0, b - a))}</small></div>
       <div class="who">${cb(r)}<b>${esc(r.name)}</b>${r.note ? `<div class="note">${esc(r.note)}</div>` : ''}
-      ${r.tel ? `<a class="tel" href="tel:${esc(telHref(r.tel))}">📞 ${esc(r.tel)}</a>` : ''}</div></div>`;
+      ${r.tel ? `<a class="tel" href="tel:${esc(telHref(r.tel))}">📞 ${esc(r.tel)}</a>${future ? `<a class="sms ${sent[sentKey(date, r)] ? 'done' : ''}" href="${esc(smsHref(date, r))}" data-sk="${esc(sentKey(date, r))}">${sent[sentKey(date, r)] ? '✓ SMS' : '📩 SMS'}</a>` : ''}` : ''}</div></div>`;
   });
   return h + `<div class="sum">Razem: <b>${rides.length} ${rideWord(rides.length)}, ${fmtH(min)} h</b></div>`;
 }
@@ -203,7 +244,7 @@ function render(errMsg) {
   m.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { view = b.dataset.v; day = view === 'tom' ? addDays(todayStr(), 1) : todayStr(); render(); });
   m.querySelectorAll('[data-d]').forEach(c => c.onclick = () => { day = c.dataset.d; view = 'day'; render(); window.scrollTo(0, 0); });
   if ($('pv')) { $('pv').onclick = () => { day = addDays(day, -1); view = 'day'; render(); }; $('nx').onclick = () => { day = addDays(day, 1); view = 'day'; render(); }; }
-  bindSearch(); bindFoot();
+  bindSearch(); bindFoot(); bindSms();
 }
 function bindSearch() {
   const i = $('q'); if (!i) return;

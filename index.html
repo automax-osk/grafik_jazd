@@ -113,7 +113,8 @@
   .kinfo.end { background:#e9f9ef; color:#1f7a45; }
   .kinfo.bad { background:#fdecea; color:var(--err); font-weight:600; }
   .kinfo.man { background:#fff8e1; color:#8d5a00; }
-  .kinfo select.kcat, td select.kcat { width:auto; padding:2px 6px; font-size:.8rem; margin:0 4px; }
+  .kinfo select.kcat, td select.kcat, .offitem select.kcat { width:auto; padding:2px 6px; font-size:.8rem; margin:0 4px; }
+  input.ktel { width:118px; padding:2px 6px; font-size:.8rem; margin:0 4px; display:inline-block; }
   .kinfo a.buy, a.buy { color:var(--c); font-weight:700; margin-left:4px; }
   .cat { display:inline-block; min-width:26px; padding:0 5px; border:2px solid currentColor; border-radius:5px; font-weight:800; font-size:.78rem; line-height:1.35; text-align:center; color:#1565c0; background:#fff; letter-spacing:.3px; vertical-align:1px; margin-right:6px; }
   .cat[data-c^="A"] { color:#2e7d32; } .cat[data-c^="C"] { color:#e65100; } .cat[data-c^="D"] { color:#6a1b9a; } .cat[data-c^="T"] { color:#5d4037; } .cat[data-c="BE"] { color:#0d47a1; }
@@ -244,7 +245,7 @@
 
 <main id="main"></main>
 
-<details class="ver"><summary>Grafik pracy instruktorów · <b>wersja 1.4</b> · co nowego?</summary><div class="chg"><h4>1.4 – 17.11.2026</h4><ul><li>Przycisk 🗑 „Usuń kursanta” dla kursantów spoza rejestru PKK (zakładka Kursanci, po haśle).</li></ul><h4>1.3 – 17.11.2026</h4><ul><li>Numer wersji i lista zmian na dole programu.</li></ul><h4>1.2 – 16.11.2026</h4><ul><li>Znaczki kategorii (B, BE, A…) przy kursancie – w grafiku, na wydruku, na WhatsAppie i u instruktora.</li><li>Kategoria dla kursantów spoza rejestru PKK.</li><li>Dokupione godziny (➕ h) z historią.</li><li>Domyślne godziny kursu dla wszystkich kategorii wg rozporządzenia.</li></ul><h4>1.1 – 15.11.2026</h4><ul><li>„Mój grafik” – osobny link dla każdego instruktora, z wyszukiwarką kursanta i ikoną na telefon.</li></ul><h4>1.0 – 14.11.2026</h4><ul><li>Pierwsza wersja: grafik jazd, kursanci z rejestru PKK, wolne, zestawienie miesięczne, wysyłka na WhatsApp, kopia na Dysku Google.</li></ul></div></details>
+<details class="ver"><summary>Grafik pracy instruktorów · <b>wersja 1.5</b> · co nowego?</summary><div class="chg"><h4>1.5 – 18.11.2026</h4><ul><li>Telefon kursanta spoza rejestru PKK – wpisany raz, zapamiętuje się przy kursancie i trafia do „Mój grafik” instruktora.</li><li>„Mój grafik”: przypomnienia SMS o jeździe dla kursantów.</li></ul><h4>1.4 – 17.11.2026</h4><ul><li>Przycisk 🗑 „Usuń kursanta” dla kursantów spoza rejestru PKK (zakładka Kursanci, po haśle).</li></ul><h4>1.3 – 17.11.2026</h4><ul><li>Numer wersji i lista zmian na dole programu.</li></ul><h4>1.2 – 16.11.2026</h4><ul><li>Znaczki kategorii (B, BE, A…) przy kursancie – w grafiku, na wydruku, na WhatsAppie i u instruktora.</li><li>Kategoria dla kursantów spoza rejestru PKK.</li><li>Dokupione godziny (➕ h) z historią.</li><li>Domyślne godziny kursu dla wszystkich kategorii wg rozporządzenia.</li></ul><h4>1.1 – 15.11.2026</h4><ul><li>„Mój grafik” – osobny link dla każdego instruktora, z wyszukiwarką kursanta i ikoną na telefon.</li></ul><h4>1.0 – 14.11.2026</h4><ul><li>Pierwsza wersja: grafik jazd, kursanci z rejestru PKK, wolne, zestawienie miesięczne, wysyłka na WhatsApp, kopia na Dysku Google.</li></ul></div></details>
 
 <div id="printArea"></div>
 
@@ -415,7 +416,7 @@ function render() {
         ${(() => { const c = !s.virtual && s.name.trim() ? slotCat(kst, s) : ''; return `<div class="nmw">${catBadge(c)}<input class="name" placeholder="Imię i nazwisko kursanta" value="${esc(s.name)}" autocomplete="off" list="kursanci"${c ? ` style="padding-left:${30 + c.length * 9}px"` : ''}></div>`; })()}
         <input class="note" placeholder="Uwagi" value="${esc(s.note)}">
         ${s.virtual ? '<span></span>' : '<button class="del" title="Usuń ten termin">✕</button>'}
-      </div>${!s.virtual && s.name.trim() ? (rideInfo(kst, s) ? kBadge(rideInfo(kst, s)) : `<div class="kinfo man">✍️ <b>${esc(s.name)}</b> – nie ma w rejestrze PKK. Kategoria:${catSelect(s.name, '')}<span>(znaczek i liczenie godzin kursu)</span></div>`) : ''}${offHit(s, offs).length ? `<div class="offwarn ${s.name.trim() ? 'bad' : ''}">⛔ ${s.name.trim() ? 'Uwaga: jazda w czasie wolnym instruktora' : 'Wolne instruktora – nie planować'}: ${offText(offHit(s, offs))}</div>` : ''}${gaps.filter(g => g.after === i).map(g => `<div class="gap">☕ Przerwa <b>${fmtDur(g.min)}</b> <span>${g.from} – ${g.to}</span></div>`).join('')}`).join('') || (grid ? '<div class="empty">Brak terminów w tym dniu.</div>' : '')}
+      </div>${!s.virtual && s.name.trim() ? (rideInfo(kst, s) ? kBadge(rideInfo(kst, s)) : `<div class="kinfo man">✍️ <b>${esc(s.name)}</b> – nie ma w rejestrze PKK. Kategoria:${catSelect(s.name, '')} Telefon:${telInput(s.name, '')}<span>(znaczek, liczenie godzin, telefon dla instruktora)</span></div>`) : ''}${offHit(s, offs).length ? `<div class="offwarn ${s.name.trim() ? 'bad' : ''}">⛔ ${s.name.trim() ? 'Uwaga: jazda w czasie wolnym instruktora' : 'Wolne instruktora – nie planować'}: ${offText(offHit(s, offs))}</div>` : ''}${gaps.filter(g => g.after === i).map(g => `<div class="gap">☕ Przerwa <b>${fmtDur(g.min)}</b> <span>${g.from} – ${g.to}</span></div>`).join('')}`).join('') || (grid ? '<div class="empty">Brak terminów w tym dniu.</div>' : '')}
     </div>
     ${grid ? '' : `
     <div class="slot newride" id="newRide">
@@ -1057,12 +1058,19 @@ const CATS = ['AM','A1','A2','A','B1','B','BE','C1','C1E','C','CE','D1','D1E','D
 /* rejestr PKK + kursanci spoza rejestru z ręcznie wpisaną kategorią (rejestr ma pierwszeństwo przy tym samym nazwisku) */
 function kList() {
   const l = pkkList(), have = new Set(l.map(k => nName(k.name))), m = db.kCat || {};
-  return l.concat(Object.keys(m).filter(n => !have.has(n) && m[n] && m[n].cat).map(n => ({ id:'m:' + n, name:m[n].name, cat:m[n].cat, kurs:'', manual:true })));
+  return l.concat(Object.keys(m).filter(n => !have.has(n) && m[n] && (m[n].cat || m[n].phone)).map(n => ({ id:'m:' + n, name:m[n].name, cat:m[n].cat || '', phone:m[n].phone || '', kurs:'', manual:true })));
 }
 function setManualCat(name, cat) {
-  const n = nName(name); if (!n) return; db.kCat = db.kCat || {};
-  if (cat) db.kCat[n] = { name:String(name).trim(), cat }; else delete db.kCat[n];
+  const n = nName(name); if (!n) return; db.kCat = db.kCat || {}; const o = db.kCat[n] || {};
+  if (cat || o.phone) db.kCat[n] = { ...o, name:String(name).trim(), cat:cat || '' }; else delete db.kCat[n];
 }
+/* telefon kursanta spoza rejestru – zapamiętany przy kursancie, trafia też do „Mój grafik” instruktora */
+function setManualTel(name, tel) {
+  const n = nName(name); if (!n) return; db.kCat = db.kCat || {}; const o = db.kCat[n] || {};
+  if (tel || o.cat) db.kCat[n] = { ...o, name:String(name).trim(), cat:o.cat || '', phone:tel }; else delete db.kCat[n];
+}
+const fmtTel = v => { const d = String(v || '').replace(/\D/g, '').replace(/^48(?=\d{9}$)/, ''); return d.length === 9 ? d.replace(/(\d{3})(\d{3})(\d{3})/, '$1 $2 $3') : null; };
+const telInput = (name, val) => `<input class="ktel" data-n="${esc(name)}" value="${esc(val || '')}" placeholder="📞 telefon" inputmode="tel" title="Telefon kursanta (zapamięta się przy kursancie)">`;
 const catSelect = (name, val) => `<select class="kcat" data-n="${esc(name)}"><option value="">${val ? '– usuń –' : 'wybierz…'}</option>${CATS.map(c => `<option ${c === val ? 'selected' : ''}>${c}</option>`).join('')}</select>`;
 function catBadge(c, bw) { return c ? `<span class="cat${bw ? ' bw' : ''}" data-c="${esc(c)}">${esc(c)}</span>` : ''; }
 function slotCat(st, s) { const inf = rideInfo(st, s); return inf && inf.k ? catMain(inf.k).replace(/\+/g, '') : ''; }
@@ -1095,6 +1103,15 @@ async function delKursant(name) {
 }
 function bindKcat(after) {
   document.querySelectorAll('select.kcat').forEach(sel => { sel.onclick = e => e.stopPropagation(); sel.onchange = () => { setManualCat(sel.dataset.n, sel.value); save(); after(); }; });
+  document.querySelectorAll('input.ktel').forEach(inp => {
+    inp.onclick = e => e.stopPropagation();
+    inp.onkeydown = e => { e.stopPropagation(); if (e.key === 'Enter') inp.blur(); };
+    inp.onchange = () => {
+      const v = inp.value.trim(), t = v ? fmtTel(v) : '';
+      if (t === null) { alert('Wpisz 9-cyfrowy numer telefonu, np. 600 123 456.'); inp.value = (db.kCat?.[nName(inp.dataset.n)]?.phone) || ''; return; }
+      setManualTel(inp.dataset.n, t); save(); after(); toast(t ? `📞 Zapisano telefon: <b>${esc(inp.dataset.n)}</b>` : '📞 Usunięto telefon.');
+    };
+  });
   document.querySelectorAll('[data-buy]').forEach(b => b.onclick = e => { e.preventDefault(); e.stopPropagation(); const k = kList().find(x => x.id === b.dataset.buy); if (k) buyHours(k); });
 }
 function sameName(name, list = kList()) { const n = nName(name); return n ? list.filter(k => nName(k.name) === n) : []; }
@@ -1174,7 +1191,7 @@ function kBadge(info) {
     <select class="kpick" data-sid="${info.s.id}" style="width:auto;padding:3px 6px;font-size:.8rem;margin-left:4px"><option value="">wybierz…</option>${info.amb.map(k => `<option value="${k.id}">${esc(kLabel(k))}</option>`).join('')}</select>
     <span style="font-weight:400">(do czasu wyboru jazda nie liczy się żadnej z nich)</span></div>`;
   const { k, r, req, total, over } = info;
-  let txt = `🎓 ${esc(k.name)}${kTag(k) ? ' (' + esc(kTag(k)) + ')' : ''}${k.manual ? ' · ✍️ spoza rejestru, kat.' + catSelect(k.name, k.cat) : (catMain(k) ? ' · kat. ' + esc(catMain(k)) : '')} · ta jazda: <b>${fmtH(r.cumFrom)}–${fmtH(r.cumTo)} h</b>${req ? ' z ' + req : ''}`;
+  let txt = `🎓 ${esc(k.name)}${kTag(k) ? ' (' + esc(kTag(k)) + ')' : ''}${k.manual ? ' · ✍️ spoza rejestru, kat.' + catSelect(k.name, k.cat) + telInput(k.name, k.phone) : (catMain(k) ? ' · kat. ' + esc(catMain(k)) : '')} · ta jazda: <b>${fmtH(r.cumFrom)}–${fmtH(r.cumTo)} h</b>${req ? ' z ' + req : ''}`;
   txt += ` · łącznie w grafiku ${fmtH(total)} h${req ? ' / ' + req + ' h' : ''}`;
   let cls = '';
   if (kExtraH(k.id)) txt += ` <span class="xtra">(w tym ${fmtH(kExtraH(k.id) * 60)} h dokupione)</span>`;
@@ -1364,7 +1381,7 @@ function renderKurs() {
       <thead><tr><th>Kursant</th><th>Godziny</th><th>Najbliższa jazda</th><th></th></tr></thead>
       <tbody>${rows.map(r => `
         <tr class="krow" data-k="${r.k.id}">
-          <td><b>${esc(r.k.name)}</b>${kTag(r.k, st.list) ? ` <span class="dupe">⚠️ ${sameName(r.k.name, st.list).length} osoby o tym nazwisku</span>` : ''}<br><small style="color:var(--mut)">${r.k.manual ? '✍️ spoza rejestru · kat.' + catSelect(r.k.name, r.k.cat) : (r.k.cat ? catBadge(catMain(r.k)) + 'kat. ' + esc(r.k.cat) : '')}${r.k.kurs ? ' · ' + esc(r.k.kurs) : ''}${r.k.phone ? ' · 📞 ' + esc(r.k.phone) : ''}</small></td>
+          <td><b>${esc(r.k.name)}</b>${kTag(r.k, st.list) ? ` <span class="dupe">⚠️ ${sameName(r.k.name, st.list).length} osoby o tym nazwisku</span>` : ''}<br><small style="color:var(--mut)">${r.k.manual ? '✍️ spoza rejestru · kat.' + catSelect(r.k.name, r.k.cat) + telInput(r.k.name, r.k.phone) : (r.k.cat ? catBadge(catMain(r.k)) + 'kat. ' + esc(r.k.cat) : '')}${r.k.kurs ? ' · ' + esc(r.k.kurs) : ''}${r.k.phone && !r.k.manual ? ' · 📞 ' + esc(r.k.phone) : ''}</small></td>
           <td style="min-width:150px"><b>${fmtH(r.x.done)}</b>${r.req ? ' / ' + r.req : ''} h wyjeżdżone${kExtraH(r.k.id) ? `<br><small class="xtra">${reqBase(r.k) ? reqBase(r.k) + ' h kurs + ' : ''}${fmtH(kExtraH(r.k.id) * 60)} h dokupione</small>` : ''}${r.x.plan ? `<br><small>+ ${fmtH(r.x.plan)} h zaplanowane</small>` : ''}
             ${r.req ? (r.left < 0 ? `<br><small style="color:var(--err);font-weight:600">⚠️ ponad kurs o ${fmtH(-r.left)} h</small>` : `<br><small>zostało do zaplanowania: <b>${fmtH(r.left)} h</b></small>`) : `<br><small style="color:#b45309">${/uzup/i.test(r.k.kurs || '') ? 'uzupełniający – ustaw godziny ✏️' : 'brak limitu godzin'}</small>`}
             ${bar(r.x, r.req)}</td>
@@ -1382,7 +1399,7 @@ function renderKurs() {
   </div>` : ''}
   ${others.length ? `<div class="card">
     <h2 style="margin:0 0 6px;font-size:1rem">Jazdy kursantów spoza rejestru PKK <small style="color:var(--mut);font-weight:400">(nazwisko w grafiku inne niż w rejestrze)</small></h2>
-    ${others.map(o => `<div class="offitem"><b>${esc(o.name)}</b> <span>${o.rides.length} ${rideWord(o.rides.length)} · ${fmtH(o.done + o.plan)} h</span><span style="margin-left:auto;font-size:.85rem">kategoria:${catSelect(o.name, '')}</span> <button class="btn sec small" data-delk="${esc(o.name)}" title="Usuń kursanta">🗑</button></div>`).join('')}
+    ${others.map(o => `<div class="offitem"><b>${esc(o.name)}</b> <span>${o.rides.length} ${rideWord(o.rides.length)} · ${fmtH(o.done + o.plan)} h</span><span style="margin-left:auto;font-size:.85rem">kategoria:${catSelect(o.name, '')}${telInput(o.name, '')}</span> <button class="btn sec small" data-delk="${esc(o.name)}" title="Usuń kursanta">🗑</button></div>`).join('')}
     <p class="lock" style="margin:8px 0 0">Jeśli kursant jest w rejestrze – wpisz w grafiku dokładnie takie imię i nazwisko (podpowiada się przy wpisywaniu). Jeśli go nie ma – wybierz kategorię, a godziny kursu zaczną mu się liczyć.</p>
   </div>` : ''}`;
   bindKcat(renderKurs);
