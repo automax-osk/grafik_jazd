@@ -245,7 +245,7 @@
 
 <main id="main"></main>
 
-<details class="ver"><summary>Grafik pracy instruktorów · <b>wersja 1.5</b> · co nowego?</summary><div class="chg"><h4>1.5 – 18.11.2026</h4><ul><li>Telefon kursanta spoza rejestru PKK – wpisany raz, zapamiętuje się przy kursancie i trafia do „Mój grafik” instruktora.</li><li>„Mój grafik”: przypomnienia SMS o jeździe dla kursantów.</li></ul><h4>1.4 – 17.11.2026</h4><ul><li>Przycisk 🗑 „Usuń kursanta” dla kursantów spoza rejestru PKK (zakładka Kursanci, po haśle).</li></ul><h4>1.3 – 17.11.2026</h4><ul><li>Numer wersji i lista zmian na dole programu.</li></ul><h4>1.2 – 16.11.2026</h4><ul><li>Znaczki kategorii (B, BE, A…) przy kursancie – w grafiku, na wydruku, na WhatsAppie i u instruktora.</li><li>Kategoria dla kursantów spoza rejestru PKK.</li><li>Dokupione godziny (➕ h) z historią.</li><li>Domyślne godziny kursu dla wszystkich kategorii wg rozporządzenia.</li></ul><h4>1.1 – 15.11.2026</h4><ul><li>„Mój grafik” – osobny link dla każdego instruktora, z wyszukiwarką kursanta i ikoną na telefon.</li></ul><h4>1.0 – 14.11.2026</h4><ul><li>Pierwsza wersja: grafik jazd, kursanci z rejestru PKK, wolne, zestawienie miesięczne, wysyłka na WhatsApp, kopia na Dysku Google.</li></ul></div></details>
+<details class="ver"><summary>Grafik pracy instruktorów · <b>wersja 1.6</b> · co nowego?</summary><div class="chg"><h4>1.6 – 19.11.2026</h4><ul><li>„Mój grafik”: powiadomienie o zmianach w grafiku, postęp kursanta (która godzina kursu) i podsumowanie godzin instruktora w miesiącu.</li></ul><h4>1.5 – 18.11.2026</h4><ul><li>Telefon kursanta spoza rejestru PKK – wpisany raz, zapamiętuje się przy kursancie i trafia do „Mój grafik” instruktora.</li><li>„Mój grafik”: przypomnienia SMS o jeździe dla kursantów.</li></ul><h4>1.4 – 17.11.2026</h4><ul><li>Przycisk 🗑 „Usuń kursanta” dla kursantów spoza rejestru PKK (zakładka Kursanci, po haśle).</li></ul><h4>1.3 – 17.11.2026</h4><ul><li>Numer wersji i lista zmian na dole programu.</li></ul><h4>1.2 – 16.11.2026</h4><ul><li>Znaczki kategorii (B, BE, A…) przy kursancie – w grafiku, na wydruku, na WhatsAppie i u instruktora.</li><li>Kategoria dla kursantów spoza rejestru PKK.</li><li>Dokupione godziny (➕ h) z historią.</li><li>Domyślne godziny kursu dla wszystkich kategorii wg rozporządzenia.</li></ul><h4>1.1 – 15.11.2026</h4><ul><li>„Mój grafik” – osobny link dla każdego instruktora, z wyszukiwarką kursanta i ikoną na telefon.</li></ul><h4>1.0 – 14.11.2026</h4><ul><li>Pierwsza wersja: grafik jazd, kursanci z rejestru PKK, wolne, zestawienie miesięczne, wysyłka na WhatsApp, kopia na Dysku Google.</li></ul></div></details>
 
 <div id="printArea"></div>
 
@@ -1713,11 +1713,15 @@ async function readCopy(id) { return JSON.parse(await (await gfetch(`${DRV}/${id
 /* ---------- grafik w telefonie instruktora: osobny plik na Dysku dla każdego instruktora ---------- */
 /* w pliku są TYLKO jazdy i wolne danego instruktora (7 dni wstecz, 90 dni naprzód); link „każdy z linkiem może czytać” */
 function instPayload(inst) {
-  const from = addDays(todayStr(), -7), to = addDays(todayStr(), 90), list = kList(), st = kStats(), days = {}, off = {};
+  // od początku poprzedniego miesiąca (podsumowanie godzin instruktora) do 90 dni naprzód
+  const t0 = parseD(todayStr()), pm = todayStr(new Date(t0.getFullYear(), t0.getMonth() - 1, 1));
+  const from = pm < addDays(todayStr(), -7) ? pm : addDays(todayStr(), -7), to = addDays(todayStr(), 90), list = kList(), st = kStats(), days = {}, off = {};
+  const r1 = m => Math.round(m / 6) / 10;
   Object.keys(db.days).forEach(k => {
     const [id, d] = k.split('|'); if (id !== inst.id || d < from || d > to) return;
     const r = db.days[k].filter(s => s.name.trim()).sort((a, b) => toMin(a.start) - toMin(b.start))
-      .map(s => { const kk = findK(s.name, list); return { start:s.start, end:s.end, name:s.name.trim(), note:(s.note || '').trim(), tel:(kk && kk.phone) || '', cat:slotCat(st, s) }; });
+      .map(s => { const kk = findK(s.name, list), inf = rideInfo(st, s), pr = inf && !inf.amb ? { a:r1(inf.r.cumFrom), b:r1(inf.r.cumTo), req:inf.req || 0 } : null;
+        return { start:s.start, end:s.end, name:s.name.trim(), note:(s.note || '').trim(), tel:(kk && kk.phone) || '', cat:slotCat(st, s), ...(pr ? { prog:pr } : {}) }; });
     if (r.length) days[d] = r;
   });
   Object.keys(db.off).forEach(k => {

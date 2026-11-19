@@ -54,6 +54,24 @@
   .offb { background:var(--off); border-left:4px solid #ef6c00; border-radius:8px; padding:8px 10px; margin-bottom:8px; font-size:.92rem; }
   .sum { color:var(--mut); font-size:.9rem; text-align:right; margin-top:6px; }
   .empty { color:var(--mut); text-align:center; padding:22px 6px; }
+  .prog { font-size:.8rem; color:var(--mut); margin-top:3px; display:flex; align-items:center; gap:6px; }
+  .prog i { flex:0 0 70px; height:5px; background:#e3e8ef; border-radius:3px; overflow:hidden; display:inline-block; }
+  .prog i b { display:block; height:100%; background:var(--ok); }
+  .prog.over { color:var(--err); font-weight:600; } .prog.over i b { background:var(--err); }
+  .chgbox { background:#fff8e1; border:1px solid #ffd54f; border-radius:12px; padding:10px 12px; margin-bottom:10px; font-size:.9rem; }
+  .chgbox h3 { margin:0 0 6px; font-size:1rem; }
+  .chgbox .it { padding:5px 0; border-top:1px dashed #f0d68a; cursor:pointer; }
+  .chgbox .it:first-of-type { border-top:0; }
+  .chgbox .it b { font-variant-numeric:tabular-nums; }
+  .chgbox .ok { margin-top:8px; width:100%; border:0; border-radius:10px; padding:10px; background:#f9a825; color:#fff; font-weight:700; font-size:.95rem; }
+  .tag { display:inline-block; font-size:.7rem; font-weight:700; border-radius:5px; padding:1px 6px; margin-left:6px; vertical-align:2px; background:#ffb300; color:#fff; }
+  .ride.chg { background:#fff8e1; border-radius:8px; }
+  .mstat { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:6px 0 4px; }
+  .mstat div { background:#f3f5f8; border-radius:10px; padding:9px 10px; }
+  .mstat small { display:block; color:var(--mut); font-size:.78rem; }
+  .mstat b { font-size:1.25rem; }
+  .mrow { display:flex; justify-content:space-between; padding:6px 2px; border-top:1px solid var(--line); font-size:.92rem; cursor:pointer; }
+  .mrow.past { color:var(--mut); }
   .wk h3 { margin:0 0 4px; font-size:.98rem; display:flex; justify-content:space-between; }
   .wk h3 span { color:var(--mut); font-weight:500; font-size:.85rem; }
   .wk .r { font-size:.93rem; padding:3px 0; }
@@ -96,7 +114,7 @@
   <div class="upd" id="upd"></div>
 </header>
 <main id="main"><div class="msg">Wczytywanie…</div></main>
-<details class="ver"><summary>Mój grafik · <b>wersja 1.4</b> · co nowego?</summary><div class="chg"><h4>1.4 – 18.11.2026</h4><ul><li>📩 Przypomnienia SMS dla kursantów – pojedynczo albo po kolei dla całego dnia, z własną treścią.</li><li>Telefon kursanta spoza rejestru (wpisany w grafiku albo w uwagach) – można zadzwonić jednym stuknięciem.</li></ul><h4>1.3 – 17.11.2026</h4><ul><li>Numer wersji na dole.</li></ul><h4>1.2 – 16.11.2026</h4><ul><li>Znaczek kategorii przy kursancie.</li></ul><h4>1.1 – 15.11.2026</h4><ul><li>Wyszukiwarka kursanta.</li><li>Ikona i nazwa „Mój grafik” na ekranie telefonu.</li></ul><h4>1.0 – 15.11.2026</h4><ul><li>Pierwsza wersja: dziś, jutro, tydzień, telefony kursantów.</li></ul></div></details>
+<details class="ver"><summary>Mój grafik · <b>wersja 1.5</b> · co nowego?</summary><div class="chg"><h4>1.5 – 19.11.2026</h4><ul><li>🔔 Powiadomienie, gdy biuro zmieni grafik – nowe, przesunięte i odwołane jazdy (domyślnie dziś i jutro, na dole można włączyć cały grafik).</li><li>🎓 Postęp kursanta przy jeździe (która godzina kursu).</li><li>Zakładka „Godziny” – Twoje godziny w tym i poprzednim miesiącu.</li></ul><h4>1.4 – 18.11.2026</h4><ul><li>📩 Przypomnienia SMS dla kursantów – pojedynczo albo po kolei dla całego dnia, z własną treścią.</li><li>Telefon kursanta spoza rejestru (wpisany w grafiku albo w uwagach) – można zadzwonić jednym stuknięciem.</li></ul><h4>1.3 – 17.11.2026</h4><ul><li>Numer wersji na dole.</li></ul><h4>1.2 – 16.11.2026</h4><ul><li>Znaczek kategorii przy kursancie.</li></ul><h4>1.1 – 15.11.2026</h4><ul><li>Wyszukiwarka kursanta.</li><li>Ikona i nazwa „Mój grafik” na ekranie telefonu.</li></ul><h4>1.0 – 15.11.2026</h4><ul><li>Pierwsza wersja: dziś, jutro, tydzień, telefony kursantów.</li></ul></div></details>
 
 <script>
 const $ = id => document.getElementById(id);
@@ -123,6 +141,39 @@ if (hp.get('f') && hp.get('k')) { if (cfg.f !== hp.get('f')) cfg = { f:hp.get('f
 function store() { try { localStorage.setItem(SKEY, JSON.stringify(cfg)); } catch(e) {} }
 
 let data = cfg.data || null, view = 'today', day = todayStr(), offline = false, loading = false, q = '';
+/* ---------- zmiany w grafiku: porównanie z ostatnio „odhaczonym” grafikiem ---------- */
+const BKEY = 'automax_seen_v1';
+const rsig = r => `${r.start}-${r.end}|${norm(r.name)}`;
+function futureSigs() { const t = todayStr(), o = {}; Object.keys((data && data.days) || {}).forEach(d => { if (d >= t) o[d] = data.days[d].map(rsig); }); return o; }
+function getSeen() { try { return JSON.parse(localStorage.getItem(BKEY)) || null; } catch(e) { return null; } }
+/* zakres powiadomień: domyślnie tylko dziś i jutro, można włączyć cały grafik */
+const ZKEY = 'automax_chg_all';
+const chgAll = () => { try { return localStorage.getItem(ZKEY) === '1'; } catch(e) { return false; } };
+const inScope = d => chgAll() || d <= addDays(todayStr(), 1);
+function setSeen() {
+  // przy zakresie „dziś i jutro” odhaczamy tylko te dni – zmiany na dalsze dni pokażą się, gdy przyjdzie ich kolej
+  const cur = futureSigs(), old = getSeen(), t = todayStr(), days = {};
+  if (old && old.f === cfg.f && !chgAll()) Object.keys(old.days || {}).forEach(d => { if (d >= t && !inScope(d)) days[d] = old.days[d]; });
+  Object.keys(cur).forEach(d => { if (inScope(d) || !old || old.f !== cfg.f) days[d] = cur[d]; });
+  if (old && old.f === cfg.f && !chgAll()) Object.keys(cur).forEach(d => { if (!inScope(d) && !(d in days)) days[d] = []; });
+  try { localStorage.setItem(BKEY, JSON.stringify({ f:cfg.f, days })); } catch(e) {}
+}
+function diffChanges() {
+  const seen = getSeen(); if (!data) return [];
+  if (!seen || seen.f !== cfg.f) { setSeen(); return []; }
+  const t = todayStr(), cur = futureSigs(), out = [];
+  [...new Set([...Object.keys(cur), ...Object.keys(seen.days || {})])].filter(d => d >= t && inScope(d)).sort().forEach(d => {
+    const a = cur[d] || [], b = (seen.days && seen.days[d]) || [];
+    const add = a.filter(x => !b.includes(x)), del = b.filter(x => !a.includes(x));
+    add.forEach(x => {   // ten sam kursant tego dnia zniknął z innej godziny = przesunięcie
+      const nm = x.split('|')[1], j = del.findIndex(y => y.split('|')[1] === nm);
+      if (j >= 0) { out.push({ d, type:'mov', from:del[j], to:x }); del.splice(j, 1); } else out.push({ d, type:'add', to:x });
+    });
+    del.forEach(x => out.push({ d, type:'del', from:x }));
+  });
+  return out;
+}
+let changes = [];
 const norm = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ł/g, 'l').replace(/Ł/g, 'l').toLowerCase().trim();
 
 async function load() {
@@ -137,7 +188,7 @@ async function load() {
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const d = await r.json();
     if (!d || d.app !== 'grafik-instruktor') throw new Error('zły plik');
-    data = d; cfg.data = d; cfg.got = new Date().toISOString(); store(); offline = false;
+    data = d; cfg.data = d; cfg.got = new Date().toISOString(); store(); offline = false; changes = diffChanges();
   } catch(e) { offline = true; }
   finally { loading = false; }
   render();
@@ -177,6 +228,23 @@ function bindSms() {
   const t = $('tpl'); if (t) t.oninput = () => { try { localStorage.setItem(TKEY, t.value.trim() || TPL_DEF); } catch(e) {} };
 }
 function offOf(date) { return (data && data.off && data.off[date]) || []; }
+const fmtN = n => String(n).replace('.', ',');
+function progHtml(r) {
+  const p = r.prog; if (!p) return '';
+  const over = p.req && p.b > p.req, pct = p.req ? Math.min(100, Math.round(p.b / p.req * 100)) : 0;
+  return `<div class="prog ${over ? 'over' : ''}">${p.req ? `<i><b style="width:${pct}%"></b></i>` : ''}🎓 ${fmtN(p.a)}–${fmtN(p.b)} h${p.req ? ' z ' + p.req : ''}${over ? ' · ponad kurs' : p.req && p.b === p.req ? ' · ostatnia jazda kursu' : ''}</div>`;
+}
+const nameOfSig = x => { const r = Object.values((data && data.days) || {}).flat().find(r => norm(r.name) === x.split('|')[1]); return r ? r.name : x.split('|')[1]; };
+const timeOfSig = x => x.split('|')[0].replace('-', '–');
+function changesHtml() {
+  if (!changes.length) return '';
+  const lbl = d => { const s = relDay(d); return s.charAt(0).toUpperCase() + s.slice(1) + ' ' + fmtDay(d); };
+  return `<div class="chgbox"><h3>🔔 Grafik się zmienił (${changes.length})<small style="font-weight:400;color:var(--mut);font-size:.78rem"> · ${chgAll() ? 'cały grafik' : 'dziś i jutro'}</small></h3>
+    ${changes.map(c => `<div class="it" data-d="${c.d}">${lbl(c.d)}: ${c.type === 'add' ? `➕ nowa jazda <b>${timeOfSig(c.to)}</b> ${esc(nameOfSig(c.to))}`
+      : c.type === 'del' ? `➖ odwołana <s>${timeOfSig(c.from)}</s> ${esc(nameOfSig(c.from))}`
+      : `🔁 ${esc(nameOfSig(c.to))}: <s>${timeOfSig(c.from)}</s> → <b>${timeOfSig(c.to)}</b>`}</div>`).join('')}
+    <button class="ok" id="seenOk">✓ OK, widziałem zmiany</button></div>`;
+}
 function offLine(o) { return `${esc(o.from)}–${esc(o.to)}${o.note ? ' (' + esc(o.note) + ')' : ''}`; }
 
 function dayHtml(date) {
@@ -189,9 +257,10 @@ function dayHtml(date) {
   rides.forEach((r, i) => {
     const a = toMin(r.start), b = toMin(r.end); min += Math.max(0, b - a);
     if (i) { const g = a - toMin(rides[i-1].end); if (g > 0) h += `<div class="gap">– przerwa ${fmtDur(g)} –</div>`; }
-    const cls = isToday ? (nowM >= a && nowM < b ? 'now' : nowM >= b ? 'past' : '') : '';
+    const ch = changes.find(c => c.d === date && c.to === rsig(r));
+    const cls = (isToday ? (nowM >= a && nowM < b ? 'now' : nowM >= b ? 'past' : '') : '') + (ch ? ' chg' : '');
     h += `<div class="ride ${cls}"><div class="tm">${esc(r.start)}–${esc(r.end)}<small>${fmtDur(Math.max(0, b - a))}</small></div>
-      <div class="who">${cb(r)}<b>${esc(r.name)}</b>${r.note ? `<div class="note">${esc(r.note)}</div>` : ''}
+      <div class="who">${cb(r)}<b>${esc(r.name)}</b>${ch ? `<span class="tag">${ch.type === 'add' ? 'NOWA' : 'ZMIANA'}</span>` : ''}${progHtml(r)}${r.note ? `<div class="note">${esc(r.note)}</div>` : ''}
       ${r.tel ? `<a class="tel" href="tel:${esc(telHref(r.tel))}">📞 ${esc(r.tel)}</a>${future ? `<a class="sms ${sent[sentKey(date, r)] ? 'done' : ''}" href="${esc(smsHref(date, r))}" data-sk="${esc(sentKey(date, r))}">${sent[sentKey(date, r)] ? '✓ SMS' : '📩 SMS'}</a>` : ''}` : ''}</div></div>`;
   });
   return h + `<div class="sum">Razem: <b>${rides.length} ${rideWord(rides.length)}, ${fmtH(min)} h</b></div>`;
@@ -226,8 +295,10 @@ function render(errMsg) {
   let h = offline ? `<div class="warn">📴 Brak internetu – pokazuję ostatnio pobrany grafik.</div>` : '';
   h += `<div class="search"><input id="q" type="text" enterkeyhint="search" placeholder="🔍 Szukaj kursanta (imię lub nazwisko)" value="${esc(q)}" autocomplete="off">${q ? '<button id="qx" aria-label="Wyczyść">✕</button>' : ''}</div>`;
   if (q.trim()) { m.innerHTML = h + searchHtml() + footHtml(); bindSearch(); bindFoot(); return; }
-  h += `<div class="seg"><button data-v="today" class="${view==='today'?'on':''}">Dziś</button><button data-v="tom" class="${view==='tom'?'on':''}">Jutro</button><button data-v="week" class="${view==='week'?'on':''}">Tydzień</button></div>`;
-  if (view === 'week') {
+  h += changesHtml();
+  h += `<div class="seg"><button data-v="today" class="${view==='today'?'on':''}">Dziś</button><button data-v="tom" class="${view==='tom'?'on':''}">Jutro</button><button data-v="week" class="${view==='week'?'on':''}">Tydzień</button><button data-v="month" class="${view==='month'?'on':''}">Godziny</button></div>`;
+  if (view === 'month') h += monthHtml();
+  else if (view === 'week') {
     for (let i = 0; i < 7; i++) {
       const d = addDays(t, i), rides = ridesOf(d), offs = offOf(d);
       const min = rides.reduce((a, r) => a + Math.max(0, toMin(r.end) - toMin(r.start)), 0);
@@ -245,6 +316,29 @@ function render(errMsg) {
   m.querySelectorAll('[data-d]').forEach(c => c.onclick = () => { day = c.dataset.d; view = 'day'; render(); window.scrollTo(0, 0); });
   if ($('pv')) { $('pv').onclick = () => { day = addDays(day, -1); view = 'day'; render(); }; $('nx').onclick = () => { day = addDays(day, 1); view = 'day'; render(); }; }
   bindSearch(); bindFoot(); bindSms();
+  if ($('seenOk')) $('seenOk').onclick = () => { setSeen(); changes = []; render(); };
+  m.querySelectorAll('.chgbox .it[data-d], .mrow[data-d]').forEach(c => c.onclick = () => { day = c.dataset.d; view = 'day'; render(); window.scrollTo(0, 0); });
+}
+/* ---------- godziny instruktora: ten i poprzedni miesiąc ---------- */
+const MNAME = ['styczeń','luty','marzec','kwiecień','maj','czerwiec','lipiec','sierpień','wrzesień','październik','listopad','grudzień'];
+function monthStats(ym) {
+  const t = todayStr(), nowM = new Date().getHours() * 60 + new Date().getMinutes(), r = { doneM:0, doneN:0, planM:0, planN:0, days:[] };
+  Object.keys((data && data.days) || {}).filter(d => d.slice(0, 7) === ym).sort().forEach(d => {
+    let dm = 0; const rides = data.days[d];
+    rides.forEach(x => { const m = Math.max(0, toMin(x.end) - toMin(x.start)); dm += m; const done = d < t || (d === t && toMin(x.end) <= nowM); if (done) { r.doneM += m; r.doneN++; } else { r.planM += m; r.planN++; } });
+    r.days.push({ d, n:rides.length, m:dm });
+  });
+  return r;
+}
+function monthHtml() {
+  const t = parseD(todayStr()), ym = todayStr().slice(0, 7), pv = todayStr(new Date(t.getFullYear(), t.getMonth() - 1, 1)).slice(0, 7);
+  const a = monthStats(ym), b = monthStats(pv), cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+  return `<div class="card"><b style="font-size:1.05rem">${cap(MNAME[t.getMonth()])} ${t.getFullYear()}</b>
+    <div class="mstat"><div><small>wyjeżdżone</small><b>${fmtH(a.doneM)} h</b><small>${a.doneN} ${rideWord(a.doneN)}</small></div>
+      <div><small>zaplanowane</small><b>${fmtH(a.planM)} h</b><small>${a.planN} ${rideWord(a.planN)}</small></div></div>
+    <div style="font-size:.9rem;margin:4px 0 8px">Razem w miesiącu: <b>${fmtH(a.doneM + a.planM)} h</b></div>
+    ${a.days.map(x => `<div class="mrow ${x.d < todayStr() ? 'past' : ''}" data-d="${x.d}"><span>${DNI[parseD(x.d).getDay()].slice(0, 3)}. ${fmtDay(x.d)}</span><span>${x.n} ${rideWord(x.n)} · <b>${fmtH(x.m)} h</b></span></div>`).join('') || '<div class="empty">Brak jazd w tym miesiącu.</div>'}</div>
+    <div class="card"><b>${cap(MNAME[(t.getMonth() + 11) % 12])}</b> – wyjeżdżone: <b>${fmtH(b.doneM + b.planM)} h</b> (${b.doneN + b.planN} ${rideWord(b.doneN + b.planN)})</div>`;
 }
 function bindSearch() {
   const i = $('q'); if (!i) return;
@@ -252,8 +346,13 @@ function bindSearch() {
   if ($('qx')) $('qx').onclick = () => { q = ''; render(); };
   $('main').querySelectorAll('.res[data-d]').forEach(c => c.onclick = () => { day = c.dataset.d; view = 'day'; q = ''; render(); window.scrollTo(0, 0); });
 }
-function footHtml() { return `<div class="foot"><button id="rf">↻ Odśwież</button></div>`; }
-function bindFoot() { if ($('rf')) $('rf').onclick = () => { $('rf').textContent = '↻ Odświeżanie…'; load(); }; }
+function footHtml() { return `<div class="foot"><button id="rf">↻ Odśwież</button>
+  <div style="margin-top:12px;font-size:.85rem;color:var(--mut)">🔔 Powiadamiaj o zmianach:
+    <select id="chgScope" style="font:inherit;padding:4px 6px;border-radius:8px;border:1px solid #cfd6df;background:#fff"><option value="0" ${chgAll() ? '' : 'selected'}>dziś i jutro</option><option value="1" ${chgAll() ? 'selected' : ''}>cały grafik</option></select></div></div>`; }
+function bindFoot() {
+  if ($('rf')) $('rf').onclick = () => { $('rf').textContent = '↻ Odświeżanie…'; load(); };
+  if ($('chgScope')) $('chgScope').onchange = e => { try { localStorage.setItem(ZKEY, e.target.value); } catch(_) {} changes = diffChanges(); render(); };
+}
 
 render(); load();
 setInterval(load, 5 * 60 * 1000);
